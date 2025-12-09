@@ -3,7 +3,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 
-SOURCE_DIR = Path("data/nlab/nlab-content")
+SOURCE_DIR = Path("nlab-content")
 OUTPUT_FILE = Path("data/nlab/input.md")
 FILE_PATTERN = "*.md"
 
