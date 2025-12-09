@@ -1,0 +1,3 @@
+[submodule "data/nlab/nlab-content"]
+	path = data/nlab/nlab-content
+	url = https://github.com/ncatlab/nlab-content.git
