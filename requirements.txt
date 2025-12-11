@@ -1,1 +1,9 @@
+ipykernel
+matplotlib
+numpy
+scipy
+tokenizers
+torch
+torchinfo
 tqdm
+transformers
