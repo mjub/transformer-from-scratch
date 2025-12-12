@@ -1,0 +1,11 @@
+{
+    "name": "PyTorch",
+    "image": "ghcr.io/mjub/transformer-from-scratch/devcontainer:latest",
+    "overrideCommand": true,
+    "runArgs": [
+        "--gpus",
+        "all"
+    ],
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+}

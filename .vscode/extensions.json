@@ -1,8 +1,10 @@
 {
     "recommendations": [
+        "ms-python.black-formatter",
+        "ms-python.isort",
         "ms-python.python",
         "ms-toolsai.jupyter",
-        "charliermarsh.ruff",
+        "ms-toolsai.tensorboard",
         "RSIP-Vision.nvidia-smi-plus"
     ]
 }
