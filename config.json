@@ -1,0 +1,9 @@
+{
+    "seed": 1728,
+
+    "vocab_size": 1024,
+    "special_tokens": [
+        "<|startoftext|>",
+        "<|endoftext|>"
+    ]
+}
