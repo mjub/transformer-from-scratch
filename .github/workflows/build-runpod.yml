@@ -1,21 +1,20 @@
-name: Build Devcontainer
+name: Build RunPod Image
 
 on:
   push:
     branches: [main]
     paths:
-      - ".devcontainer/Dockerfile.pytorch"
-      - "requirements.txt"
-      - ".github/workflows/build-devcontainer.yml"
+      - ".devcontainer/Dockerfile.runpod"
+      - ".github/workflows/build-runpod.yml"
   workflow_dispatch:
 
 concurrency:
-  group: build-devcontainer
+  group: build-runpod
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/devcontainer
+  IMAGE_NAME: ${{ github.repository }}/runpod
 
 permissions:
   contents: read
@@ -61,7 +60,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: .devcontainer/Dockerfile.pytorch
+          file: .devcontainer/Dockerfile.runpod
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
