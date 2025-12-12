@@ -1,0 +1,17 @@
+ARG PYTORCH_VERSION="2.9.1-cuda13.0-cudnn9-devel"
+FROM pytorch/pytorch:${PYTORCH_VERSION}
+
+ENV PIP_ROOT_USER_ACTION=ignore
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --upgrade pip uv
+
+COPY requirements.txt /tmp/requirements.txt
+
+RUN uv pip install --system --no-cache -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
