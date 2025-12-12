@@ -45,7 +45,7 @@ def prepare_data(config):
             document = normalize(f"# {title}\n\n{body}")
             documents.append(f"<|startoftext|>\n{document}\n<|endoftext|>\n")
         except Exception as e:
-            print(f"  ⚠️  Skipping {page}: {e}")
+            print(f"⚠️ Skipping {page}: {e}")
 
     tokenizer = tokenizers.Tokenizer(tokenizers.models.BPE())
     trainer = tokenizers.trainers.BpeTrainer(
@@ -65,7 +65,7 @@ def prepare_data(config):
     tokenizer.save("data/tokenizer.json")
     print(f"🎯 Tokenizer trained, vocab size: {tokenizer.get_vocab_size():,}")
 
-    print("⚙️  Encoding corpus...")
+    print("⚙️ Encoding corpus...")
     ids = (x.ids for x in tokenizer.encode_batch_fast(documents))
     data = torch.tensor(list(itertools.chain.from_iterable(ids)))
     print(f"📦 Encoded {len(data):,} tokens")
