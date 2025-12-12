@@ -48,26 +48,24 @@ def prepare_data(config):
                 title = fd.read().strip()
             with open(page, "r", encoding="utf-8") as fd:
                 body = fd.read().strip()
-            document = normalize(f"# {title}\n\n{body}")
-            documents.append(f"<|startoftext|>\n{document}\n<|endoftext|>\n")
+            documents.append(normalize(f"# {title}\n\n{body}"))
         except Exception as e:
             print(f"⚠️ Skipping {page}: {e}")
 
     tokenizer = tokenizers.Tokenizer(tokenizers.models.BPE())
-    trainer = tokenizers.trainers.BpeTrainer(
-        vocab_size=config.vocab_size, special_tokens=config.special_tokens
-    )
-
     tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Sequence(
         [
             tokenizers.pre_tokenizers.Split(SPLIT_PATTERN, behavior="isolated"),
             tokenizers.pre_tokenizers.ByteLevel(add_prefix_space=False),
         ]
     )
+    tokenizer.decoder = tokenizers.decoders.ByteLevel()
 
     print("🔤 Training BPE tokenizer...")
+    trainer = tokenizers.trainers.BpeTrainer(
+        vocab_size=config.vocab_size, special_tokens=config.special_tokens
+    )
     tokenizer.train_from_iterator(documents, trainer=trainer, length=len(documents))
-    tokenizer.decoder = tokenizers.decoders.ByteLevel()
     tokenizer.save("data/tokenizer.json")
     print(f"🎯 Tokenizer trained, vocab size: {tokenizer.get_vocab_size():,}")
 
@@ -75,7 +73,15 @@ def prepare_data(config):
     data = torch.tensor(
         list(
             itertools.chain.from_iterable(
-                (x.ids for x in tokenizer.encode_batch_fast(documents))
+                (
+                    x.ids
+                    for x in tokenizer.encode_batch_fast(
+                        [
+                            f"<|startoftext|>{document}<|endoftext|>"
+                            for document in documents
+                        ]
+                    )
+                )
             )
         )
     )
