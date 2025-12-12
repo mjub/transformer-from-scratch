@@ -18,7 +18,13 @@ SPLIT_PATTERN = "|".join(
     [
         r"\\[a-zA-Z][a-zA-Z0-9]*",
         r"\\[^a-zA-Z]",
+        r"\$+",
         r"[\(\)\[\]\{\}]",
+        r"[#*`]+",
+        r"\d+",
+        r"\w+",
+        r"\s+",
+        r"[^\s\w]",
     ]
 )
 
@@ -66,8 +72,13 @@ def prepare_data(config):
     print(f"🎯 Tokenizer trained, vocab size: {tokenizer.get_vocab_size():,}")
 
     print("⚙️ Encoding corpus...")
-    ids = (x.ids for x in tokenizer.encode_batch_fast(documents))
-    data = torch.tensor(list(itertools.chain.from_iterable(ids)))
+    data = torch.tensor(
+        list(
+            itertools.chain.from_iterable(
+                (x.ids for x in tokenizer.encode_batch_fast(documents))
+            )
+        )
+    )
     print(f"📦 Encoded {len(data):,} tokens")
 
     n = int(len(data) * 0.9)
