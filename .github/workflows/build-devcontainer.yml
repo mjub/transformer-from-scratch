@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ".devcontainer/Dockerfile.pytorch"
+      - ".devcontainer/Dockerfile"
       - "requirements.txt"
       - ".github/workflows/build-devcontainer.yml"
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: .devcontainer/Dockerfile.pytorch
+          file: .devcontainer/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
