@@ -3,9 +3,11 @@
     "image": "ghcr.io/mjub/transformer-from-scratch/devcontainer:latest",
     "overrideCommand": true,
     "runArgs": [
-        "--gpus",
-        "all"
+        // "--gpus",
+        // "all"
     ],
-    "workspaceFolder": "/workspace",
-    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    "workspaceFolder": "/workspace/${localWorkspaceFolderBasename}",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/${localWorkspaceFolderBasename},type=bind",
+    // Silence the permission mismatch error
+    "postCreateCommand": "git config --global --add safe.directory '*'"
 }
