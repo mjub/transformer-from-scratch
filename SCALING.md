@@ -29,3 +29,7 @@
  - $P \approx 12 \times L \times d_{\text{model}}^2$
 
    The number of trainable parameters $P$ is roughly equal to $12 \times L \times d_{\text{model}}^2$.
+
+ - $\sigma = \frac{0.02}{2 L}$
+
+   The target standard deviation for `nn.init.normal_` should ideally be equal to `0.02` divided by the square root of 2 times the number of layers.

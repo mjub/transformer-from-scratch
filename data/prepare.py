@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import random
+import re
 import types
 
 import torch
@@ -13,6 +14,20 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 import tokenizers
 
 SOURCE_DIR = "nlab-content"
+
+NORMALIZE_PATTERNS = list(
+    map(
+        lambda x: (re.compile(x[0]), x[1]),
+        [
+            (r"\[\[![^\]]+\]\]", r""),
+            (r"\[\[(?:[^\|\]]+\|)?([^\]]+)\]\]", r"\1"),
+            (r"\{#[^\}]+}", ""),
+            (r"\n{3,}", r"\n\n"),
+            (r" {2,}", r" "),
+            (r"\t", r"    "),
+        ],
+    )
+)
 
 SPLIT_PATTERN = "|".join(
     [
@@ -30,7 +45,10 @@ SPLIT_PATTERN = "|".join(
 
 
 def normalize(document):
-    return html.unescape(document)
+    document = html.unescape(document)
+    for pattern, repl in NORMALIZE_PATTERNS:
+        document = pattern.sub(repl, document)
+    return document
 
 
 def prepare_data(config):

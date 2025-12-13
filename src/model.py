@@ -86,7 +86,7 @@ class GroupedQueryAttention(nn.Module):
 
         # (B, H, T, D) @ (B, G * Hk, D, T) -> (B, H, T, T)
         attn_scores = (q @ k.transpose(-2, -1)) * self.scale
-        attn_scores = attn_scores.masked_fill(self.causal_mask[:T, :T], float("-inf"))
+        attn_scores = attn_scores.masked_fill(self.causal_mask[:T, :T], -torch.inf)
 
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_weights = self.attn_dropout(attn_weights)
@@ -126,6 +126,8 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
 
+        self.config = config
+
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
         self.embed_positions = nn.Embedding(
             config.max_position_embeddings, config.hidden_size
@@ -138,8 +140,20 @@ class Transformer(nn.Module):
         self.norm = nn.RMSNorm(config.hidden_size)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        # Fix exploding logits
+        self.apply(self._init_weights)
+
         if config.tie_word_embeddings:
             self.lm_head.weight = self.embed_tokens.weight
+
+    def _init_weights(self, module):
+        std = 0.02
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=std)
 
     # (B, T) -> (B, T, V)
     def forward(self, input_ids, labels=None):
@@ -167,3 +181,22 @@ class Transformer(nn.Module):
             loss = None
 
         return logits, loss
+
+    @torch.no_grad()
+    def generate(self, input_ids, max_new_tokens, temperature=1.0, top_k=None):
+        for _ in range(max_new_tokens):
+            # (B, T) -> (B, T, V)
+            logits, _ = self(input_ids[:, -self.config.max_position_embeddings :])
+            # (B, T, V) -> (B, V)
+            logits = logits[:, -1, :] / temperature
+
+            if top_k is not None:
+                v, _ = torch.topk(logits, top_k)
+                logits = logits.masked_fill(logits < v[:, [-1]], -torch.inf)
+
+            probs = F.softmax(logits, dim=-1)
+
+            next_token = torch.multinomial(probs, num_samples=1)
+            yield next_token
+
+            input_ids = torch.cat([input_ids, next_token], dim=1)
