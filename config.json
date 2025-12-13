@@ -1,19 +1,20 @@
 {
+    "hidden_size": 384,
+    "intermediate_size": 1536,
+    "num_hidden_layers": 4,
+    "max_position_embeddings": 1024,
+    "tie_word_embeddings": true,
+
+    "num_attention_heads": 6,
+    "num_key_value_heads": 3,
+    "head_dim": 64,
+
+    "dropout_p": 0.1,
     "seed": 1728,
 
-    "vocab_size": 1024,
+    "vocab_size": 8192,
     "special_tokens": [
         "<|startoftext|>",
         "<|endoftext|>"
-    ],
-
-    "hidden_size": 384,
-    "max_position_embeddings": 1024,
-    "hidden_dropout_prob": 0.1,
-    "num_hidden_layers": 4,
-    "tie_word_embeddings": true,
-
-    "head_dim": 64,
-    "num_attention_heads": 6,
-    "num_key_value_heads": 3
+    ]
 }

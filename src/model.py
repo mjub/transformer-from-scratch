@@ -3,7 +3,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class FeedForward(nn.Module): ...
+class FeedForward(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(config.hidden_size, config.intermediate_size, bias=False),
+            nn.GELU(),
+            nn.Linear(config.intermediate_size, config.hidden_size, bias=False),
+            nn.Dropout(config.dropout_p),
+        )
+
+    # (B, T, C) -> (B, T, C)
+    def forward(self, x):
+        return self.net(x)
 
 
 class GroupedQueryAttention(nn.Module):
@@ -20,6 +33,11 @@ class GroupedQueryAttention(nn.Module):
             2 * config.num_key_value_heads * config.head_dim,
             bias=False,
         )
+
+        self.num_key_value_groups = (
+            self.config.num_attention_heads // self.config.num_key_value_heads
+        )
+
         self.scale = config.head_dim**-0.5
         self.register_buffer(
             "causal_mask",
@@ -33,16 +51,15 @@ class GroupedQueryAttention(nn.Module):
             ),
             persistent=False,
         )
-        self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.attn_dropout = nn.Dropout(config.dropout_p)
         self.o_proj = nn.Linear(
             config.num_attention_heads * config.head_dim, config.hidden_size, bias=False
         )
-        self.resid_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.resid_dropout = nn.Dropout(config.dropout_p)
 
     # (B, T, C) -> (B, T, C)
     def forward(self, x):
-        B, T, C = x.shape
-        G = self.config.num_attention_heads // self.config.num_key_value_heads
+        B, T, _ = x.shape
 
         q = (
             self.q_proj(x)
@@ -57,14 +74,14 @@ class GroupedQueryAttention(nn.Module):
         k = (
             k.view(B, T, self.config.num_key_value_heads, self.config.head_dim)
             .transpose(1, 2)
-            .repeat_interleave(G, dim=1)
+            .repeat_interleave(self.num_key_value_groups, dim=1)
         )
 
         # (B, T, Hk * D) -> (B, T, Hk, D) -> (B, Hk, T, D) -> (B, G * Hk, T, D)
         v = (
             v.view(B, T, self.config.num_key_value_heads, self.config.head_dim)
             .transpose(1, 2)
-            .repeat_interleave(G, dim=1)
+            .repeat_interleave(self.num_key_value_groups, dim=1)
         )
 
         # (B, H, T, D) @ (B, G * Hk, D, T) -> (B, H, T, T)
@@ -114,7 +131,7 @@ class Transformer(nn.Module):
             config.max_position_embeddings, config.hidden_size
         )
 
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.embed_dropout = nn.Dropout(config.dropout_p)
         self.layers = nn.ModuleList(
             [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         )
@@ -126,7 +143,7 @@ class Transformer(nn.Module):
 
     # (B, T) -> (B, T, V)
     def forward(self, input_ids, labels=None):
-        B, T = input_ids.shape
+        _, T = input_ids.shape
 
         # (B, T) -> (B, T, C)
         input_embeds = self.embed_tokens(input_ids)
@@ -136,7 +153,7 @@ class Transformer(nn.Module):
 
         # (B, T, C) + (T, C) -> (B, T, C)
         x = input_embeds + position_embeds
-        x = self.dropout(x)
+        x = self.embed_dropout(x)
         for layer in self.layers:
             # TODO KV Caching
             x = layer(x)
@@ -144,10 +161,9 @@ class Transformer(nn.Module):
 
         # (B, T, C) @ (C, V) -> (B, T, V)
         logits = self.lm_head(x)
-        loss = (
-            None
-            if labels is None
-            else F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-        )
+        if labels is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
+        else:
+            loss = None
 
         return logits, loss
