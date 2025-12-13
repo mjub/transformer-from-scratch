@@ -5,9 +5,13 @@
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
         }
+
     },
     "isort.args": [
         "--profile",
         "black"
-    ]
+    ],
+    "notebook.defaultFormatter": "ms-python.black-formatter",
+    "notebook.formatOnCellExecution": true,
+    "notebook.formatOnSave.enabled": true,
 }
