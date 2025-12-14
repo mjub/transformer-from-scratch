@@ -6,5 +6,6 @@ tensorboard
 tokenizers
 torch
 torchinfo
+torch-tb-profiler
 tqdm
 transformers

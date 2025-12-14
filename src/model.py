@@ -111,9 +111,11 @@ class DecoderLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.input_layernorm = nn.RMSNorm(config.hidden_size)
+        self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.self_attn = GroupedQueryAttention(config)
-        self.post_attention_layernorm = nn.RMSNorm(config.hidden_size)
+        self.post_attention_layernorm = nn.RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
         self.mlp = FeedForward(config)
 
     # (B, T, C) -> (B, T, C)
@@ -138,7 +140,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList(
             [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         )
-        self.norm = nn.RMSNorm(config.hidden_size)
+        self.norm = nn.RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Fix exploding logits
@@ -176,19 +178,20 @@ class Transformer(nn.Module):
 
         # (B, T, C) @ (C, V) -> (B, T, V)
         logits = self.lm_head(x)
-        if labels is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-        else:
-            loss = None
 
-        return logits, loss
+        if labels is not None:
+            return logits, F.cross_entropy(
+                logits.view(-1, logits.size(-1)), labels.view(-1)
+            )
+        else:
+            return logits
 
     # TODO Refactor
     @torch.no_grad()
     def generate(self, input_ids, max_new_tokens, temperature=1.0, top_k=None):
         for _ in range(max_new_tokens):
             # (B, T) -> (B, T, V)
-            logits, _ = self(input_ids[:, -self.config.max_position_embeddings :])
+            logits = self(input_ids[:, -self.config.max_position_embeddings :])
             # (B, T, V) -> (B, V)
             logits = logits[:, -1, :] / temperature
 

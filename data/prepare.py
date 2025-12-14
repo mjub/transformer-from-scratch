@@ -112,6 +112,7 @@ def prepare_data(config):
 
 
 if __name__ == "__main__":
+    # TODO Use argparse
     with open("config.json") as fd:
         config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
     prepare_data(config)

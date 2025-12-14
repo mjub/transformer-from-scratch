@@ -2,9 +2,11 @@ import datetime
 import hashlib
 import json
 import os
+import time
 import types
 
 import torch
+import torch.utils.tensorboard
 import tqdm
 import transformers
 
@@ -34,15 +36,14 @@ class Run:
         ).hexdigest()[:8]
         self.name = f"{config.name}-{num_params/1e6:.1f}M-{hash}"
 
-        self.loss_history = []
-
     @classmethod
     def from_file(cls, path):
         states = torch.load(path)
 
-        run = cls(states["config"])
-        # run.config gets overwritten but it doesn't matter
+        run = cls(types.SimpleNamespace(**states["config"]))
         for attr in states:
+            if attr == "config":
+                continue
             if hasattr(run, attr):
                 if hasattr(getattr(run, attr), "load_state_dict"):
                     getattr(run, attr).load_state_dict(states[attr])
@@ -55,13 +56,12 @@ class Run:
             {
                 "name": self.name,
                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                "config": self.config,
+                "config": vars(self.config),
                 "model": self.model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
                 "scheduler": self.scheduler.state_dict(),
                 "global_step": self.global_step,
                 "tokens_seen": self.tokens_seen,
-                "loss_history": self.loss_history,
             },
             path,
         )
@@ -81,6 +81,25 @@ class Trainer:
 
         self.train_data = torch.load(config.train_data).to(self.device)
         self.val_data = torch.load(config.val_data).to(self.device)
+
+        run_dir = os.path.join(self.config.runs_dir, self.run.name)
+        os.makedirs(run_dir, exist_ok=True)
+        # Save the current config within the run directory
+        with open(os.path.join(run_dir, "config.json"), "w") as fd:
+            json.dump(vars(self.config), fd)
+        self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=run_dir)
+
+        self.run.model.eval()
+        self.writer.add_graph(
+            self.run.model,
+            torch.randint(
+                0,
+                config.vocab_size,
+                (1, config.max_position_embeddings),
+                device=self.device,
+            ),
+        )
+        self.run.model.train()
 
     def get_batch(self, mode="train"):
         data = self.train_data if mode == "train" else self.val_data
@@ -114,34 +133,48 @@ class Trainer:
         self.run.scheduler.step()
         self.run.global_step += 1
 
+        # We log everything because the dataset is small
+        self.writer.add_scalar("loss/train", loss.item(), self.run.global_step)
+
     def train(self):
-        run_dir = os.path.join(self.config.runs_dir, self.run.name)
-        os.makedirs(run_dir, exist_ok=True)
-        for _ in tqdm.tqdm(range(self.run.global_step, self.config.max_steps)):
-            self.step()
-            if self.run.global_step % self.config.eval_steps == 0:
-                losses = self.evaluate()
+        try:
+            last = time.time()
+            for _ in tqdm.tqdm(range(self.run.global_step, self.config.max_steps)):
+                self.step()
+                if self.run.global_step % self.config.eval_steps == 0:
+                    losses = self.evaluate()
 
-                print(
-                    f'Step {self.run.global_step}: train loss = {losses["train"]:.6f}, val loss = {losses["val"]:.6f}'
-                )
-
-                self.run.loss_history.append(
-                    {
-                        "global_step": self.run.global_step,
-                        "train_loss": losses["train"],
-                        "val_loss": losses["val"],
-                        "tokens_seen": self.run.tokens_seen,
-                    }
-                )
-
-                self.run.save(
-                    os.path.join(
-                        self.config.runs_dir,
-                        self.run.name,
-                        f"{self.run.name}-{self.run.global_step}.pt",
+                    print(
+                        f'Step {self.run.global_step}: train loss = {losses["train"]:.6f}, val loss = {losses["val"]:.6f}'
                     )
-                )
+
+                    self.writer.add_scalar(
+                        "loss/val", losses["val"], self.run.global_step
+                    )
+                    self.writer.add_scalar(
+                        "lr",
+                        self.run.optimizer.param_groups[0]["lr"],
+                        self.run.global_step,
+                    )
+                    self.writer.add_scalar(
+                        "tokens_seen", self.run.tokens_seen, self.run.global_step
+                    )
+                    self.writer.flush()
+
+                    # If we're in evaluation mode and it's been more than 10min, save a checkpoint
+                    if (time.time() - last) / 60.0 >= 10.0:
+                        self.run.save(
+                            os.path.join(
+                                self.config.runs_dir,
+                                self.run.name,
+                                f"{self.run.name}-{self.run.global_step}.pt",
+                            )
+                        )
+                        last = time.time()
+
+        except BaseException as e:
+            self.writer.close()
+            raise e
 
     @torch.no_grad()
     def evaluate(self):
@@ -159,7 +192,10 @@ class Trainer:
 
 
 if __name__ == "__main__":
+    # TODO Use argparse
+    # TODO Check config logic
     with open("config.json") as fd:
-        config = types.SimpleNamespace(**json.load(fd))
+        config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
+    # Run a brand-new training round
     trainer = Trainer(config, Run(config))
     trainer.train()
