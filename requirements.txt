@@ -2,6 +2,7 @@ ipykernel
 matplotlib
 numpy
 scipy
+tensorboard
 tokenizers
 torch
 torchinfo
