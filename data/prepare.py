@@ -84,7 +84,7 @@ def prepare_data(config):
         vocab_size=config.vocab_size, special_tokens=config.special_tokens
     )
     tokenizer.train_from_iterator(documents, trainer=trainer, length=len(documents))
-    tokenizer.save("data/tokenizer.json")
+    tokenizer.save(config.tokenizer)
     print(f"🎯 Tokenizer trained, vocab size: {tokenizer.get_vocab_size():,}")
 
     print("⚙️ Encoding corpus...")
@@ -106,8 +106,8 @@ def prepare_data(config):
     print(f"📦 Encoded {len(data):,} tokens")
 
     n = int(len(data) * 0.9)
-    torch.save(data[:n].clone(), "data/train_data.bin")
-    torch.save(data[n:].clone(), "data/val_data.bin")
+    torch.save(data[:n].clone(), config.train_data)
+    torch.save(data[n:].clone(), config.val_data)
     print(f"✅ Done! Train: {n:,} tokens | Val: {len(data) - n:,} tokens")
 
 

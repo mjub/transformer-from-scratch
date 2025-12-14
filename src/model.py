@@ -11,7 +11,7 @@ class FeedForward(nn.Module):
             nn.Linear(config.hidden_size, config.intermediate_size, bias=False),
             nn.GELU(),
             nn.Linear(config.intermediate_size, config.hidden_size, bias=False),
-            nn.Dropout(config.dropout_p),
+            nn.Dropout(config.dropout),
         )
 
     # (B, T, C) -> (B, T, C)
@@ -25,12 +25,13 @@ class GroupedQueryAttention(nn.Module):
 
         self.config = config
 
+        self.head_dim = config.hidden_size // config.num_attention_heads
         self.q_proj = nn.Linear(
-            config.hidden_size, config.num_attention_heads * config.head_dim, bias=False
+            config.hidden_size, config.num_attention_heads * self.head_dim, bias=False
         )
         self.kv_proj = nn.Linear(
             config.hidden_size,
-            2 * config.num_key_value_heads * config.head_dim,
+            2 * config.num_key_value_heads * self.head_dim,
             bias=False,
         )
 
@@ -38,7 +39,7 @@ class GroupedQueryAttention(nn.Module):
             self.config.num_attention_heads // self.config.num_key_value_heads
         )
 
-        self.scale = config.head_dim**-0.5
+        self.scale = self.head_dim**-0.5
         self.register_buffer(
             "causal_mask",
             torch.triu(
@@ -51,11 +52,11 @@ class GroupedQueryAttention(nn.Module):
             ),
             persistent=False,
         )
-        self.attn_dropout = nn.Dropout(config.dropout_p)
+        self.attn_dropout = nn.Dropout(config.dropout)
         self.o_proj = nn.Linear(
-            config.num_attention_heads * config.head_dim, config.hidden_size, bias=False
+            config.num_attention_heads * self.head_dim, config.hidden_size, bias=False
         )
-        self.resid_dropout = nn.Dropout(config.dropout_p)
+        self.resid_dropout = nn.Dropout(config.dropout)
 
     # (B, T, C) -> (B, T, C)
     def forward(self, x):
@@ -63,7 +64,7 @@ class GroupedQueryAttention(nn.Module):
 
         q = (
             self.q_proj(x)
-            .view(B, T, self.config.num_attention_heads, self.config.head_dim)
+            .view(B, T, self.config.num_attention_heads, self.head_dim)
             .transpose(1, 2)
         )  # (B, H, T, D)
 
@@ -72,14 +73,14 @@ class GroupedQueryAttention(nn.Module):
 
         # (B, T, Hk * D) -> (B, T, Hk, D) -> (B, Hk, T, D) -> (B, G * Hk, T, D)
         k = (
-            k.view(B, T, self.config.num_key_value_heads, self.config.head_dim)
+            k.view(B, T, self.config.num_key_value_heads, self.head_dim)
             .transpose(1, 2)
             .repeat_interleave(self.num_key_value_groups, dim=1)
         )
 
         # (B, T, Hk * D) -> (B, T, Hk, D) -> (B, Hk, T, D) -> (B, G * Hk, T, D)
         v = (
-            v.view(B, T, self.config.num_key_value_heads, self.config.head_dim)
+            v.view(B, T, self.config.num_key_value_heads, self.head_dim)
             .transpose(1, 2)
             .repeat_interleave(self.num_key_value_groups, dim=1)
         )
@@ -97,7 +98,7 @@ class GroupedQueryAttention(nn.Module):
         out = (
             out.transpose(1, 2)
             .contiguous()
-            .view(B, T, self.config.num_attention_heads * self.config.head_dim)
+            .view(B, T, self.config.num_attention_heads * self.head_dim)
         )
 
         # (B, T, H * D) -> (B, T, C)
@@ -133,7 +134,7 @@ class Transformer(nn.Module):
             config.max_position_embeddings, config.hidden_size
         )
 
-        self.embed_dropout = nn.Dropout(config.dropout_p)
+        self.embed_dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
             [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         )
@@ -182,6 +183,7 @@ class Transformer(nn.Module):
 
         return logits, loss
 
+    # TODO Refactor
     @torch.no_grad()
     def generate(self, input_ids, max_new_tokens, temperature=1.0, top_k=None):
         for _ in range(max_new_tokens):
