@@ -188,8 +188,10 @@ class Transformer(nn.Module):
 
     # TODO Refactor
     @torch.no_grad()
-    def generate(self, input_ids, max_new_tokens, temperature=1.0, top_k=None):
-        for _ in range(max_new_tokens):
+    def generate(self, input_ids, temperature=1.0, top_k=None):
+        # We keep no more than max_position_embeddings tokens
+        input_ids = input_ids[:, -self.config.max_position_embeddings :]
+        while True:
             # (B, T) -> (B, T, V)
             logits = self(input_ids[:, -self.config.max_position_embeddings :])
             # (B, T, V) -> (B, V)
@@ -205,3 +207,4 @@ class Transformer(nn.Module):
             yield next_token
 
             input_ids = torch.cat([input_ids, next_token], dim=1)
+            input_ids = input_ids[:, -self.config.max_position_embeddings :]
