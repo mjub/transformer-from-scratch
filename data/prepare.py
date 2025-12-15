@@ -26,7 +26,7 @@ NORMALIZE_PATTERNS = list(
             (r"\[\[(?:[^\|\]]+\|)?([^\]]+)\]\]", r"\1"),
             # Strip bold and italics
             # Note: we can't strip _ without risking to break math environments
-            (r"\*(\**)([^\W\*](?:[^\*]|(?<=\\)\*)*)(?<!\\)\*(?(1)\1|(?!\*))", r"\1"),
+            (r"\*(\**)([^\W\*](?:[^\*]|(?<=\\)\*)*)(?<!\\)\*(?(1)\1|(?!\*))", r"\2"),
             # Strip references
             (r"\{#[^\}]+}", ""),
             # Strip multiple newlines
