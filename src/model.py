@@ -59,7 +59,7 @@ class GroupedQueryAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.dropout)
 
     # (B, T, C) -> (B, T, C)
-    def forward(self, x):
+    def forward(self, x, layer=None, attention_callback=None):
         B, T, _ = x.shape
 
         q = (
@@ -90,6 +90,10 @@ class GroupedQueryAttention(nn.Module):
         attn_scores = attn_scores.masked_fill(self.causal_mask[:T, :T], -torch.inf)
 
         attn_weights = F.softmax(attn_scores, dim=-1)
+        if layer is not None and attention_callback:
+            detached = attn_weights.detach().cpu().numpy()
+            for head in range(self.config.num_attention_heads):
+                attention_callback(layer, head, detached[0, head, :, :])
         attn_weights = self.attn_dropout(attn_weights)
 
         # (B, H, T, T) @ (B, G * Hk, T, D) -> (B, H, T, D)
@@ -119,8 +123,10 @@ class DecoderLayer(nn.Module):
         self.mlp = FeedForward(config)
 
     # (B, T, C) -> (B, T, C)
-    def forward(self, x):
-        x = x + self.self_attn(self.input_layernorm(x))
+    def forward(self, x, layer=None, attention_callback=None):
+        x = x + self.self_attn(
+            self.input_layernorm(x), layer=layer, attention_callback=attention_callback
+        )
         x = x + self.mlp(self.post_attention_layernorm(x))
         return x
 
@@ -159,7 +165,7 @@ class Transformer(nn.Module):
             nn.init.normal_(module.weight, mean=0.0, std=std)
 
     # (B, T) -> (B, T, V)
-    def forward(self, input_ids, labels=None):
+    def forward(self, input_ids, labels=None, attention_callback=None):
         _, T = input_ids.shape
 
         # (B, T) -> (B, T, C)
@@ -171,9 +177,9 @@ class Transformer(nn.Module):
         # (B, T, C) + (T, C) -> (B, T, C)
         x = input_embeds + position_embeds
         x = self.embed_dropout(x)
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             # TODO KV Caching
-            x = layer(x)
+            x = layer(x, layer=i, attention_callback=attention_callback)
         x = self.norm(x)
 
         # (B, T, C) @ (C, V) -> (B, T, V)

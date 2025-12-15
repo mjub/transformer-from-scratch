@@ -39,7 +39,7 @@ class Run:
 
         self.model.eval()
         self._info = torchinfo.summary(
-            run.model,
+            self.model,
             input_size=(
                 self.config.per_device_train_batch_size,
                 self.config.max_position_embeddings,
@@ -104,7 +104,7 @@ class Trainer:
         log.info(
             f"🧠 Model has {self.run._info.trainable_params:,} trainable parameters"
         )
-        log.info(f"🏗️  Architecture:\n{self.run._info}")
+        log.info(f"🏗️ Architecture:\n{self.run._info}")
 
         self.run.model.to(self.device)
         log.info(f"🖥️  Using device: {self.device}")
@@ -209,7 +209,7 @@ class Trainer:
 
                     pbar.set_postfix(
                         epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
-                        lr=f'{self.run.optimizer.param_groups[0]["lr"]:.1e}',
+                        # lr=f'{self.run.optimizer.param_groups[0]["lr"]:.1e}',
                         speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
                         tokens_seen=f"{self.run.tokens_seen:,}",
                         train_loss=f"{self._loss:.2f}",
