@@ -85,8 +85,8 @@ class Trainer:
         else:
             self.device = torch.device(device)
 
-        self.config = self.run.config
         self.run = run
+        self.config = self.run.config
 
         num_params = sum(
             p.numel() for p in self.run.model.parameters() if p.requires_grad
@@ -99,8 +99,9 @@ class Trainer:
         log.info("📊 Loading training and validation data...")
         self.train_data = torch.load(self.config.train_data).to(self.device)
         self.val_data = torch.load(self.config.val_data).to(self.device)
+        self.train_data_size = self.train_data.numel()
         log.info(
-            f"    → Train: {self.train_data.numel():,} tokens | Val: {self.val_data.numel():,} tokens"
+            f"    → Train: {self.train_data_size:,} tokens | Val: {self.val_data.numel():,} tokens"
         )
 
         self.run_dir = os.path.join(self.config.runs_dir, self.run.name)
@@ -170,8 +171,14 @@ class Trainer:
         log.info(f"📋 Full configuration:\n{pprint.pformat(vars(self.config))}")
 
         try:
+            # Run a "warmup" evaluation if it is only the beginning of the run
+            if self.run.global_step == 0:
+                log.info(
+                    f"🎲 Random baseline loss: {math.log(self.config.vocab_size):.2f} (running warmup eval...)"
+                )
+                self.evaluate()
+
             starting_time = time.time()
-            train_data_size = self.train_data.numel()
 
             with tqdm.contrib.logging.logging_redirect_tqdm():
                 with tqdm.tqdm(
@@ -183,53 +190,13 @@ class Trainer:
                         self.step()
 
                         pbar.set_postfix(
-                            epoch=f"{self.run.tokens_seen / train_data_size:.1%}",
+                            epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
                             speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
                             tokens_seen=f"{self.run.tokens_seen:,}",
                         )
 
                         if self.run.global_step % self.config.eval_steps == 0:
-                            losses = self.evaluate()
-
-                            log.info(
-                                f'📈 Step {self.run.global_step:,}: train loss = {losses["train"]:.4f}, val loss = {losses["val"]:.4f}'
-                            )
-                            self.run.loss_history.append(
-                                {
-                                    "global_step": self.run.global_step,
-                                    "tokens_seen": self.run.tokens_seen,
-                                    "epochs": self.run.tokens_seen / train_data_size,
-                                    "lr": self.run.optimizer.param_groups[0]["lr"],
-                                    "loss": losses,
-                                }
-                            )
-
-                            if losses["val"] < self.run.best_validation_loss:
-                                self.run.best_validation_loss = losses["val"]
-                                self._save(f'best-{math.exp(losses["val"]):.2f}')
-
-                            self.writer.add_scalar(
-                                "loss/val", losses["val"], self.run.global_step
-                            )
-
-                            self.writer.add_scalar(
-                                "perplexity/train",
-                                math.exp(losses["train"]),
-                                self.run.global_step,
-                            )
-
-                            self.writer.add_scalar(
-                                "perplexity/val",
-                                math.exp(losses["val"]),
-                                self.run.global_step,
-                            )
-
-                            self.writer.add_scalar(
-                                "lr",
-                                self.run.optimizer.param_groups[0]["lr"],
-                                self.run.global_step,
-                            )
-                            self.writer.flush()
+                            self.evaluate()
 
                         if self.run.global_step % self.config.checkpoint_steps == 0:
                             self._save()
@@ -265,7 +232,41 @@ class Trainer:
                 total += loss.item()
             losses[mode] = total / self.config.max_eval_samples
         self.run.model.train()
-        return losses
+
+        log.info(
+            f'📈 Step {self.run.global_step:,}: train loss = {losses["train"]:.4f}, val loss = {losses["val"]:.4f}'
+        )
+        self.run.loss_history.append(
+            {
+                "global_step": self.run.global_step,
+                "tokens_seen": self.run.tokens_seen,
+                "epochs": self.run.tokens_seen / self.train_data_size,
+                "lr": self.run.optimizer.param_groups[0]["lr"],
+                "loss": losses,
+            }
+        )
+        # Save a checkpoint if we have the best validation loss
+        if losses["val"] < self.run.best_validation_loss:
+            self.run.best_validation_loss = losses["val"]
+            self._save(f'best-{math.exp(losses["val"]):.2f}')
+
+        self.writer.add_scalar("loss/val", losses["val"], self.run.global_step)
+        self.writer.add_scalar(
+            "perplexity/train",
+            math.exp(losses["train"]),
+            self.run.global_step,
+        )
+        self.writer.add_scalar(
+            "perplexity/val",
+            math.exp(losses["val"]),
+            self.run.global_step,
+        )
+        self.writer.add_scalar(
+            "lr",
+            self.run.optimizer.param_groups[0]["lr"],
+            self.run.global_step,
+        )
+        self.writer.flush()
 
 
 if __name__ == "__main__":
@@ -298,4 +299,5 @@ if __name__ == "__main__":
     log.info(f"📁 Run directory: {trainer.run_dir}")
 
     # Run a brand-new training round
+    trainer.train()
     trainer.train()

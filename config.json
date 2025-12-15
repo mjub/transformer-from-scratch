@@ -8,11 +8,11 @@
         "<|startoftext|>",
         "<|endoftext|>"
     ],
+    "vocab_size": 8192,
 
     "train_data": "data/train_data.pt",
     "val_data": "data/val_data.pt",
 
-    "vocab_size": 8192,
     "max_position_embeddings": 512,
 
     "hidden_size": 256,
