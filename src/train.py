@@ -177,14 +177,16 @@ class Trainer:
 
             with tqdm.contrib.logging.logging_redirect_tqdm():
                 with tqdm.tqdm(
-                    range(self.run.global_step, self.config.max_steps), unit="steps"
+                    range(self.run.global_step, self.config.max_steps),
+                    desc="Training",
+                    unit="steps",
                 ) as pbar:
                     for _ in pbar:
                         self.step()
 
                         pbar.set_postfix(
                             epoch=f"{self.run.tokens_seen / train_data_size:.1%}",
-                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,}tokens/s",
+                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
                             tokens_seen=f"{self.run.tokens_seen:,}",
                         )
 
