@@ -20,26 +20,42 @@ NORMALIZE_PATTERNS = list(
     map(
         lambda x: (re.compile(x[0]), x[1]),
         [
+            # Strip special anchors
             (r"\[\[![^\]]+\]\]", r""),
+            # Strip internal links
             (r"\[\[(?:[^\|\]]+\|)?([^\]]+)\]\]", r"\1"),
+            # Strip bold and italics
+            # Note: we can't strip _ without risking to break math environments
+            (r"\*(\**)([^\W\*](?:[^\*]|(?<=\\)\*)*)(?<!\\)\*(?(1)\1|(?!\*))", r"\1"),
+            # Strip references
             (r"\{#[^\}]+}", ""),
+            # Strip multiple newlines
             (r"\n{3,}", r"\n\n"),
+            # Strip multiple spaces
             (r" {2,}", r" "),
-            (r"\t", r"    "),
         ],
     )
 )
 
 SPLIT_PATTERN = "|".join(
     [
+        # Split at LaTeX commands
         r"\\[a-zA-Z][a-zA-Z0-9]*",
+        # Split at escaped characters
         r"\\[^a-zA-Z]",
-        r"\$+",
+        # Split at math environments
+        r"\$+|\\\[|\\\]",
+        # Split at delimiters
         r"[\(\)\[\]\{\}]",
+        # Split at Markdown operators
         r"[#*`]+",
+        # Split at numbers
         r"\d+",
+        # Split at words
         r"\w+",
+        # Split at spaces
         r"\s+",
+        # Split at punctuation
         r"[^\s\w]",
     ]
 )
