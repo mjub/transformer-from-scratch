@@ -23,12 +23,12 @@ class Run:
         self.config = config
         self.model = model.Transformer(config)
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=config.learning_rate
+            self.model.parameters(), lr=self.config.learning_rate
         )
         self.scheduler = transformers.get_cosine_schedule_with_warmup(
             self.optimizer,
-            num_warmup_steps=int(0.05 * config.max_steps),
-            num_training_steps=config.max_steps,
+            num_warmup_steps=int(0.05 * self.config.max_steps),
+            num_training_steps=self.config.max_steps,
         )
         self.global_step = 0
         self.tokens_seen = 0
@@ -42,7 +42,7 @@ class Run:
         config_hash = hashlib.sha256(
             bytes(repr(config), encoding="utf-8"), usedforsecurity=False
         ).hexdigest()[:8]
-        self.name = f"{config.name}-{num_params/1e6:.1f}M-{config_hash}"
+        self.name = f"{self.config.name}-{num_params/1e6:.1f}M-{config_hash}"
 
     @classmethod
     def from_file(cls, path):
@@ -79,16 +79,14 @@ class Run:
 
 
 class Trainer:
-    def __init__(self, config, run, device=None):
+    def __init__(self, run, device=None):
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = torch.device(device)
 
-        self.config = config
+        self.config = self.run.config
         self.run = run
-
-        assert vars(self.config) == vars(self.run.config)
 
         num_params = sum(
             p.numel() for p in self.run.model.parameters() if p.requires_grad
@@ -99,8 +97,8 @@ class Trainer:
         log.info(f"🖥️  Using device: {self.device}")
 
         log.info("📊 Loading training and validation data...")
-        self.train_data = torch.load(config.train_data).to(self.device)
-        self.val_data = torch.load(config.val_data).to(self.device)
+        self.train_data = torch.load(self.config.train_data).to(self.device)
+        self.val_data = torch.load(self.config.val_data).to(self.device)
         log.info(
             f"    → Train: {self.train_data.numel():,} tokens | Val: {self.val_data.numel():,} tokens"
         )
@@ -120,8 +118,8 @@ class Trainer:
             self.run.model,
             torch.randint(
                 0,
-                config.vocab_size,
-                (1, config.max_position_embeddings),
+                self.config.vocab_size,
+                (1, self.config.max_position_embeddings),
                 device=self.device,
             ),
         )
@@ -280,7 +278,7 @@ if __name__ == "__main__":
 
     run = Run(config)
 
-    run_dir = os.path.join(config.runs_dir, run.name)
+    run_dir = os.path.join(run.config.runs_dir, run.name)
     os.makedirs(run_dir, exist_ok=True)
     log.basicConfig(
         level=log.INFO,
@@ -294,7 +292,7 @@ if __name__ == "__main__":
         force=True,
     )
 
-    trainer = Trainer(config, run)
+    trainer = Trainer(run)
     assert run_dir == trainer.run_dir
 
     log.info(f"📁 Run directory: {trainer.run_dir}")
