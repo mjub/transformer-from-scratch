@@ -1,6 +1,7 @@
 import html
 import itertools
 import json
+import logging as log
 import os
 import pathlib
 import random
@@ -59,7 +60,7 @@ def prepare_data(config):
 
     documents = []
 
-    print(f"📚 Loading {len(pages):,} pages...")
+    log.info(f"📚 Loading {len(pages):,} pages...")
     for page in tqdm.tqdm(pages):
         try:
             with open(page.parent / "name", "r", encoding="utf-8") as fd:
@@ -68,7 +69,7 @@ def prepare_data(config):
                 body = fd.read().strip()
             documents.append(normalize(f"# {title}\n\n{body}"))
         except Exception as e:
-            print(f"⚠️ Skipping {page}: {e}")
+            log.warning(f"⚠️  Skipping {page}: {e.__class__.name__}: {e}")
 
     tokenizer = tokenizers.Tokenizer(tokenizers.models.BPE())
     tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Sequence(
@@ -79,15 +80,16 @@ def prepare_data(config):
     )
     tokenizer.decoder = tokenizers.decoders.ByteLevel()
 
-    print("🔤 Training BPE tokenizer...")
+    log.info("🔤 Training BPE tokenizer...")
     trainer = tokenizers.trainers.BpeTrainer(
         vocab_size=config.vocab_size, special_tokens=config.special_tokens
     )
     tokenizer.train_from_iterator(documents, trainer=trainer, length=len(documents))
     tokenizer.save(config.tokenizer)
-    print(f"🎯 Tokenizer trained, vocab size: {tokenizer.get_vocab_size():,}")
+    log.info(f"✅ Tokenizer trained and saved to {config.tokenizer}")
+    log.info(f"    → Vocab size: {tokenizer.get_vocab_size():,}")
 
-    print("⚙️ Encoding corpus...")
+    log.info("⚙️  Encoding the data now...")
     data = torch.tensor(
         list(
             itertools.chain.from_iterable(
@@ -103,16 +105,30 @@ def prepare_data(config):
             )
         )
     )
-    print(f"📦 Encoded {len(data):,} tokens")
+    log.info(f"📦 Encoded {len(data):,} tokens")
 
     n = int(len(data) * 0.9)
     torch.save(data[:n].clone(), config.train_data)
     torch.save(data[n:].clone(), config.val_data)
-    print(f"✅ Done! Train: {n:,} tokens | Val: {len(data) - n:,} tokens")
+
+    log.info(f"✅ Done! Train: {n:,} tokens | Val: {len(data) - n:,} tokens")
 
 
 if __name__ == "__main__":
+    log.basicConfig(
+        level=log.INFO,
+        format="\033[2m%(asctime)s\033[0m \033[1m\033[36m%(levelname)s\033[0m \033[1m[%(name)s]\033[0m %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            log.FileHandler("data/prepare.log"),
+            log.StreamHandler(),
+        ],
+        force=True,
+    )
+
     # TODO Use argparse
     with open("config.json") as fd:
         config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
+
+    log.info("🚀 Starting data preparation...")
     prepare_data(config)
