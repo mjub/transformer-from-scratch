@@ -29,8 +29,9 @@
     "learning_rate": 3e-4,
     "max_steps": 40000,
 
-    "eval_steps": 100,
+    "eval_steps": 500,
     "max_eval_samples": 50,
 
-    "runs_dir": "runs"
+    "runs_dir": "runs",
+    "checkpoint_steps": 1000
 }

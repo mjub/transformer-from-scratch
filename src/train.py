@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import json
 import logging as log
+import math
 import os
 import pprint
 import time
@@ -31,13 +32,16 @@ class Run:
         self.global_step = 0
         self.tokens_seen = 0
 
+        self.best_validation_loss = float("inf")
+        self.loss_history = []
+
         num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         # We use the first 8 characters of the hash of the configuration to give
         # a somewhat unique name to this run
-        hash = hashlib.sha256(
+        config_hash = hashlib.sha256(
             bytes(repr(config), encoding="utf-8"), usedforsecurity=False
         ).hexdigest()[:8]
-        self.name = f"{config.name}-{num_params/1e6:.1f}M-{hash}"
+        self.name = f"{config.name}-{num_params/1e6:.1f}M-{config_hash}"
 
     @classmethod
     def from_file(cls, path):
@@ -66,6 +70,8 @@ class Run:
                 "scheduler": self.scheduler.state_dict(),
                 "global_step": self.global_step,
                 "tokens_seen": self.tokens_seen,
+                "best_validation_loss": self.best_validation_loss,
+                "loss_history": self.loss_history,
             },
             path,
         )
@@ -98,12 +104,12 @@ class Trainer:
             f"    → Train: {self.train_data.numel():,} tokens | Val: {self.val_data.numel():,} tokens"
         )
 
-        run_dir = os.path.join(self.config.runs_dir, self.run.name)
-        os.makedirs(run_dir, exist_ok=True)
+        self.run_dir = os.path.join(self.config.runs_dir, self.run.name)
+        os.makedirs(self.run_dir, exist_ok=True)
         # Save the current config within the run directory
-        with open(os.path.join(run_dir, "config.json"), "w") as fd:
+        with open(os.path.join(self.run_dir, "config.json"), "w") as fd:
             json.dump(vars(self.config), fd)
-        self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=run_dir)
+        self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir)
 
         self.run.model.eval()
         self.writer.add_graph(
@@ -153,7 +159,6 @@ class Trainer:
         self.writer.add_scalar("loss/train", loss.item(), self.run.global_step)
 
     def train(self):
-
         log.info(
             f"🚀 Starting training for {self.config.max_steps - self.run.global_step:,} steps"
         )
@@ -175,7 +180,7 @@ class Trainer:
 
                         pbar.set_postfix(
                             tokens_seen=f"{self.run.tokens_seen:,}",
-                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,}tokens/s",
+                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
                             epoch=f"{self.run.tokens_seen / train_data_size:.1%}",
                         )
 
@@ -185,32 +190,46 @@ class Trainer:
                             log.info(
                                 f'📈 Step {self.run.global_step:,}: train loss = {losses["train"]:.4f}, val loss = {losses["val"]:.4f}'
                             )
+                            self.run.loss_history.append(
+                                {
+                                    "global_step": self.run.global_step,
+                                    "tokens_seen": self.run.tokens_seen,
+                                    "epochs": self.run.tokens_seen / train_data_size,
+                                    "lr": self.run.optimizer.param_groups[0]["lr"],
+                                    "loss": losses,
+                                }
+                            )
+
+                            if losses["val"] < self.run.best_validation_loss:
+                                self.run.best_validation_loss = losses["val"]
+                                self._save(f'best-{math.exp(losses["val"]):.2f}')
 
                             self.writer.add_scalar(
                                 "loss/val", losses["val"], self.run.global_step
                             )
+
+                            self.writer.add_scalar(
+                                "perplexity/train",
+                                math.exp(losses["train"]),
+                                self.run.global_step,
+                            )
+
+                            self.writer.add_scalar(
+                                "perplexity/val",
+                                math.exp(losses["val"]),
+                                self.run.global_step,
+                            )
+
                             self.writer.add_scalar(
                                 "lr",
                                 self.run.optimizer.param_groups[0]["lr"],
                                 self.run.global_step,
                             )
-                            self.writer.add_scalar(
-                                "tokens_seen",
-                                self.run.tokens_seen,
-                                self.run.global_step,
-                            )
                             self.writer.flush()
 
-                            # # If we're in evaluation mode and it's been more than 10min, save a checkpoint
-                            # if (time.time() - last) / 60.0 >= 10.0:
-                            #     self.run.save(
-                            #         os.path.join(
-                            #             self.config.runs_dir,
-                            #             self.run.name,
-                            #             f"{self.run.name}-{self.run.global_step}.pt",
-                            #         )
-                            #     )
-                            #     last = time.time()
+                        if self.run.global_step % self.config.checkpoint_steps == 0:
+                            self._save()
+
         except KeyboardInterrupt:
             log.warning("⚠️  Training interrupted by user")
         except BaseException as e:
@@ -220,6 +239,14 @@ class Trainer:
             self.writer.close()
 
         log.info(f"🎉 Training complete! Final step: {self.run.global_step:,}")
+
+    def _save(self, suffix=None):
+        path = os.path.join(
+            self.run_dir,
+            f"{self.run.name}-{self.run.global_step}{'-' + suffix if suffix else ''}.pt",
+        )
+        self.run.save(path)
+        log.info(f"💾 Checkpoint saved at {path}")
 
     @torch.no_grad()
     def evaluate(self):
@@ -238,6 +265,8 @@ class Trainer:
 
 if __name__ == "__main__":
     # TODO Use argparse
+    # TODO Override config from command line
+    # TODO Resume from checkpoint
     # TODO Check config logic
     with open("config.json") as fd:
         config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
@@ -258,8 +287,10 @@ if __name__ == "__main__":
         force=True,
     )
 
-    log.info(f"📁 Run directory: {run_dir}")
+    trainer = Trainer(config, run)
+    assert run_dir == trainer.run_dir
+
+    log.info(f"📁 Run directory: {trainer.run_dir}")
 
     # Run a brand-new training round
-    trainer = Trainer(config, run)
     trainer.train()
