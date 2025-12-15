@@ -5,6 +5,7 @@ import logging as log
 import math
 import os
 import pprint
+import shutil
 import time
 import types
 
@@ -109,6 +110,9 @@ class Trainer:
         # Save the current config within the run directory
         with open(os.path.join(self.run_dir, "config.json"), "w") as fd:
             json.dump(vars(self.config), fd)
+        # Also copy the tokenizer
+        shutil.copy(self.config.tokenizer, os.path.join(self.run_dir, "tokenizer.json"))
+
         self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir)
 
         self.run.model.eval()
@@ -173,15 +177,15 @@ class Trainer:
 
             with tqdm.contrib.logging.logging_redirect_tqdm():
                 with tqdm.tqdm(
-                    range(self.run.global_step, self.config.max_steps)
+                    range(self.run.global_step, self.config.max_steps), unit="steps"
                 ) as pbar:
                     for _ in pbar:
                         self.step()
 
                         pbar.set_postfix(
-                            tokens_seen=f"{self.run.tokens_seen:,}",
-                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
                             epoch=f"{self.run.tokens_seen / train_data_size:.1%}",
+                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,}tokens/s",
+                            tokens_seen=f"{self.run.tokens_seen:,}",
                         )
 
                         if self.run.global_step % self.config.eval_steps == 0:
@@ -236,9 +240,9 @@ class Trainer:
             log.error(f"❌ Training failed: {e.__class__.__name__}: {e}")
             raise
         finally:
-            self._save("interrupted")
             self.writer.close()
 
+        self._save("final")
         log.info(f"🎉 Training complete! Final step: {self.run.global_step:,}")
 
     def _save(self, suffix=None):
