@@ -236,6 +236,7 @@ class Trainer:
             log.error(f"❌ Training failed: {e.__class__.__name__}: {e}")
             raise
         finally:
+            self._save("interrupted")
             self.writer.close()
 
         log.info(f"🎉 Training complete! Final step: {self.run.global_step:,}")
