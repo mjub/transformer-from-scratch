@@ -11,6 +11,7 @@ import types
 
 import torch
 import torch.utils.tensorboard
+import torchinfo
 import tqdm
 import tqdm.contrib.logging
 import transformers
@@ -36,13 +37,25 @@ class Run:
         self.best_validation_loss = float("inf")
         self.loss_history = []
 
-        num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        self.model.eval()
+        self._info = torchinfo.summary(
+            run.model,
+            input_size=(
+                self.config.per_device_train_batch_size,
+                self.config.max_position_embeddings,
+            ),
+            dtypes=[torch.long],
+        )
+        self.model.train()
+
         # We use the first 8 characters of the hash of the configuration to give
         # a somewhat unique name to this run
         config_hash = hashlib.sha256(
             bytes(repr(config), encoding="utf-8"), usedforsecurity=False
         ).hexdigest()[:8]
-        self.name = f"{self.config.name}-{num_params/1e6:.1f}M-{config_hash}"
+        self.name = (
+            f"{self.config.name}-{self._info.trainable_params/1e6:.1f}M-{config_hash}"
+        )
 
     @classmethod
     def from_file(cls, path):
@@ -88,10 +101,10 @@ class Trainer:
         self.run = run
         self.config = self.run.config
 
-        num_params = sum(
-            p.numel() for p in self.run.model.parameters() if p.requires_grad
+        log.info(
+            f"🧠 Model has {self.run._info.trainable_params:,} trainable parameters"
         )
-        log.info(f"🧠 Model has {num_params:,} trainable parameters")
+        log.info(f"🏗️  Architecture:\n{self.run._info}")
 
         self.run.model.to(self.device)
         log.info(f"🖥️  Using device: {self.device}")
@@ -113,6 +126,7 @@ class Trainer:
         shutil.copy(self.config.tokenizer, os.path.join(self.run_dir, "tokenizer.json"))
 
         self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir)
+        self.writer_closed = False
 
         self.run.model.eval()
         self.writer.add_graph(
@@ -125,6 +139,8 @@ class Trainer:
             ),
         )
         self.run.model.train()
+
+        self._loss = math.log(self.config.vocab_size)
 
     def get_batch(self, mode="train"):
         data = self.train_data if mode == "train" else self.val_data
@@ -158,10 +174,11 @@ class Trainer:
         self.run.scheduler.step()
         self.run.global_step += 1
 
+        self._loss = loss.item()
         # We log everything because the dataset is small
-        self.writer.add_scalar("loss/train", loss.item(), self.run.global_step)
+        self.writer.add_scalar("loss/train", self._loss, self.run.global_step)
 
-    def train(self):
+    def train(self, jupyter_notebook=False, no_warmup=False):
         log.info(
             f"🚀 Starting training for {self.config.max_steps - self.run.global_step:,} steps"
         )
@@ -172,7 +189,7 @@ class Trainer:
 
         try:
             # Run a "warmup" evaluation if it is only the beginning of the run
-            if self.run.global_step == 0:
+            if self.run.global_step == 0 and not no_warmup:
                 log.info(
                     f"🎲 Random baseline loss: {math.log(self.config.vocab_size):.2f} (running warmup eval...)"
                 )
@@ -180,26 +197,29 @@ class Trainer:
 
             starting_time = time.time()
 
+            pbar = (tqdm.notebook.tqdm if jupyter_notebook else tqdm.tqdm)(
+                range(self.run.global_step, self.config.max_steps),
+                desc="Training",
+                unit="steps",
+            )
+
             with tqdm.contrib.logging.logging_redirect_tqdm():
-                with tqdm.tqdm(
-                    range(self.run.global_step, self.config.max_steps),
-                    desc="Training",
-                    unit="steps",
-                ) as pbar:
-                    for _ in pbar:
-                        self.step()
+                for _ in pbar:
+                    self.step()
 
-                        pbar.set_postfix(
-                            epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
-                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
-                            tokens_seen=f"{self.run.tokens_seen:,}",
-                        )
+                    pbar.set_postfix(
+                        epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
+                        lr=f'{self.run.optimizer.param_groups[0]["lr"]:.1e}',
+                        speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
+                        tokens_seen=f"{self.run.tokens_seen:,}",
+                        train_loss=f"{self._loss:.2f}",
+                    )
 
-                        if self.run.global_step % self.config.eval_steps == 0:
-                            self.evaluate()
+                    if self.run.global_step % self.config.eval_steps == 0:
+                        self.evaluate()
 
-                        if self.run.global_step % self.config.checkpoint_steps == 0:
-                            self._save()
+                    if self.run.global_step % self.config.checkpoint_steps == 0:
+                        self._save()
 
         except KeyboardInterrupt:
             log.warning("⚠️  Training interrupted by user")
@@ -207,7 +227,9 @@ class Trainer:
             log.error(f"❌ Training failed: {e.__class__.__name__}: {e}")
             raise
         finally:
+            pbar.close()
             self.writer.close()
+            self.writer_closed = True
 
         self._save("final")
         log.info(f"🎉 Training complete! Final step: {self.run.global_step:,}")
@@ -250,23 +272,24 @@ class Trainer:
             self.run.best_validation_loss = losses["val"]
             self._save(f'best-{math.exp(losses["val"]):.2f}')
 
-        self.writer.add_scalar("loss/val", losses["val"], self.run.global_step)
-        self.writer.add_scalar(
-            "perplexity/train",
-            math.exp(losses["train"]),
-            self.run.global_step,
-        )
-        self.writer.add_scalar(
-            "perplexity/val",
-            math.exp(losses["val"]),
-            self.run.global_step,
-        )
-        self.writer.add_scalar(
-            "lr",
-            self.run.optimizer.param_groups[0]["lr"],
-            self.run.global_step,
-        )
-        self.writer.flush()
+        if not self.writer_closed:
+            self.writer.add_scalar("loss/val", losses["val"], self.run.global_step)
+            self.writer.add_scalar(
+                "perplexity/train",
+                math.exp(losses["train"]),
+                self.run.global_step,
+            )
+            self.writer.add_scalar(
+                "perplexity/val",
+                math.exp(losses["val"]),
+                self.run.global_step,
+            )
+            self.writer.add_scalar(
+                "lr",
+                self.run.optimizer.param_groups[0]["lr"],
+                self.run.global_step,
+            )
+            self.writer.flush()
 
 
 if __name__ == "__main__":
@@ -299,5 +322,4 @@ if __name__ == "__main__":
     log.info(f"📁 Run directory: {trainer.run_dir}")
 
     # Run a brand-new training round
-    trainer.train()
     trainer.train()

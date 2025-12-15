@@ -11,7 +11,7 @@ END_TOKEN = "<|endoftext|>"
 
 def generate(
     model,
-    text: str,
+    text,
     tokens=None,
     temperature=0.7,
     device=None,
@@ -27,7 +27,7 @@ def generate(
     if isinstance(tokenizer, str):
         tokenizer = tokenizers.Tokenizer.from_file(tokenizer)
 
-    input_ids = torch.tensor([tokenizer.encode(text).ids], device=device)
+    input_ids = torch.tensor([tokenizer.encode(text or START_TOKEN).ids], device=device)
 
     count = 0
     for token_ids in model.generate(input_ids, temperature=temperature, top_k=50):
@@ -93,8 +93,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run = train.Run.from_file(args.model)
-    text = " ".join(args.text) or START_TOKEN
     tokenizer_path = args.tokenizer or run.config.tokenizer
+
+    text = " ".join(args.text)
+    print(text, end="", flush=True)
 
     for token in generate(
         run.model,
