@@ -1,13 +1,10 @@
 import argparse
 import datetime
 import hashlib
-import json
 import logging as log
 import math
 import os
-import pprint
 import time
-import types
 
 import tokenizers
 import torch
@@ -66,8 +63,8 @@ class Run:
         )
 
     @classmethod
-    def from_file(cls, path, device="cpu"):
-        states = torch.load(path, map_location=torch.device(device))
+    def from_file(cls, path):
+        states = torch.load(path, map_location="cpu")
         config = aux.config_from_dict(states["config"], validate=False)
 
         run = cls(config)
@@ -102,8 +99,9 @@ class Run:
 
 
 class Trainer:
-    def __init__(self, run, device):
+    def __init__(self, run, device, run_dir):
         self.device = torch.device(device)
+        self.run_dir = run_dir
 
         self.run = run
         self.config = self.run.config
@@ -123,24 +121,6 @@ class Trainer:
         log.info(
             f"    → Train: {self.train_data_size:,} tokens | Val: {self.val_data.numel():,} tokens"
         )
-
-        self.run_dir = os.path.join(self.config.runs_dir, self.run.name)
-        os.makedirs(self.run_dir, exist_ok=True)
-
-        self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir)
-        self.writer_closed = False
-
-        self.run.model.eval()
-        self.writer.add_graph(
-            self.run.model,
-            torch.randint(
-                0,
-                self.config.vocab_size,
-                (1, self.config.max_position_embeddings),
-                device=self.device,
-            ),
-        )
-        self.run.model.train()
 
         self._loss = math.log(self.config.vocab_size)
 
@@ -177,8 +157,6 @@ class Trainer:
         self.run.global_step += 1
 
         self._loss = loss.item()
-        # We log everything because the dataset is small
-        self.writer.add_scalar("loss/train", self._loss, self.run.global_step)
 
     def train(self, jupyter_notebook=False, no_warmup=False):
         log.info(
@@ -187,59 +165,75 @@ class Trainer:
         log.info(
             f"    → Batch size: {self.config.per_device_train_batch_size:,} | Context: {self.config.max_position_embeddings:,} | Initial LR: {self.config.learning_rate:.2e}"
         )
-        log.info(f"📋 Full configuration:\n{pprint.pformat(vars(self.config))}")
+        # log.info(f"📋 Full configuration:\n{pprint.pformat(vars(self.config))}")
 
-        try:
-            # Run a "warmup" evaluation if it is only the beginning of the run
+        with torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir) as writer:
+            self.run.model.eval()
+            writer.add_graph(
+                self.run.model,
+                torch.randint(
+                    0,
+                    self.config.vocab_size,
+                    (1, self.config.max_position_embeddings),
+                    device=self.device,
+                ),
+            )
+            self.run.model.train()
+
             if self.run.global_step == 0 and not no_warmup:
                 log.info(
                     f"🎲 Random baseline loss: {math.log(self.config.vocab_size):.2f} (running warmup eval...)"
                 )
-                self.evaluate()
+                losses = self.evaluate()
+                self._write_eval_metrics(writer, losses)
 
             starting_time = time.time()
-
             pbar = (tqdm.notebook.tqdm if jupyter_notebook else tqdm.tqdm)(
                 range(self.run.global_step, self.config.max_steps),
                 desc="Training",
                 unit="steps",
             )
 
-            with tqdm.contrib.logging.logging_redirect_tqdm():
-                for _ in pbar:
-                    self.step()
+            try:
+                with tqdm.contrib.logging.logging_redirect_tqdm():
+                    for _ in pbar:
+                        self.step()
+                        writer.add_scalar(
+                            "loss/train", self._loss, self.run.global_step
+                        )
 
-                    pbar.set_postfix(
-                        epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
-                        # lr=f'{self.run.optimizer.param_groups[0]["lr"]:.1e}',
-                        speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
-                        tokens_seen=f"{self.run.tokens_seen:,}",
-                        train_loss=f"{self._loss:.2f}",
-                    )
+                        pbar.set_postfix(
+                            epoch=f"{self.run.tokens_seen / self.train_data_size:.1%}",
+                            speed=f"{round(self.run.tokens_seen / (time.time() - starting_time)):,} tokens/s",
+                            tokens_seen=f"{self.run.tokens_seen:,}",
+                            train_loss=f"{self._loss:.2f}",
+                        )
 
-                    if self.run.global_step % self.config.eval_steps == 0:
-                        self.evaluate()
+                        if self.run.global_step % self.config.eval_steps == 0:
+                            losses = self.evaluate()
+                            self._write_eval_metrics(writer, losses)
+                            # Create a checkpoint if it's the best run so far
+                            if losses["val"] < self.run.best_validation_loss:
+                                self.run.best_validation_loss = losses["val"]
+                                self._save(f'[best({losses["val"]:.4f})]')
 
-                    if self.run.global_step % self.config.checkpoint_steps == 0:
-                        self._save()
+            except KeyboardInterrupt:
+                log.warning("⚠️  Training interrupted by user")
+            except BaseException as e:
+                log.error(f"❌ Training failed: {e.__class__.__name__}: {e}")
+                raise
+            finally:
+                pbar.close()
 
-        except KeyboardInterrupt:
-            log.warning("⚠️  Training interrupted by user")
-        except BaseException as e:
-            log.error(f"❌ Training failed: {e.__class__.__name__}: {e}")
-            raise
-        finally:
-            pbar.close()
-            self.writer.close()
-            self.writer_closed = True
-
-        self._save("final")
-        log.info(f"🎉 Training complete! Final step: {self.run.global_step:,}")
+        self._save("[final]")
+        log.info(
+            f"🎉 Training complete! Ran for {round(time.time() - starting_time):,}s | Final step: {self.run.global_step:,} | Tokens seen: {self.run.tokens_seen:,} ({self.run.tokens_seen / self.train_data_size:.1%} epochs)"
+        )
 
     def _save(self, suffix=None):
         path = os.path.join(
             self.run_dir,
-            f"{self.run.name}-{self.run.global_step}{'-' + suffix if suffix else ''}.pt",
+            f"{self.run.name}-{datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d')}-{self.run.global_step}{'-' + suffix if suffix else ''}.pt",
         )
         self.run.save(path)
         log.info(f"💾 Checkpoint saved at {path}")
@@ -269,29 +263,21 @@ class Trainer:
                 "loss": losses,
             }
         )
-        # Save a checkpoint if we have the best validation loss
-        if losses["val"] < self.run.best_validation_loss:
-            self.run.best_validation_loss = losses["val"]
-            self._save(f'best-{math.exp(losses["val"]):.2f}')
 
-        if not self.writer_closed:
-            self.writer.add_scalar("loss/val", losses["val"], self.run.global_step)
-            self.writer.add_scalar(
-                "perplexity/train",
-                math.exp(losses["train"]),
-                self.run.global_step,
-            )
-            self.writer.add_scalar(
-                "perplexity/val",
-                math.exp(losses["val"]),
-                self.run.global_step,
-            )
-            self.writer.add_scalar(
-                "lr",
-                self.run.optimizer.param_groups[0]["lr"],
-                self.run.global_step,
-            )
-            self.writer.flush()
+        return losses
+
+    def _write_eval_metrics(self, writer, losses):
+        writer.add_scalar("loss/val", losses["val"], self.run.global_step)
+        writer.add_scalar(
+            "perplexity/train", math.exp(losses["train"]), self.run.global_step
+        )
+        writer.add_scalar(
+            "perplexity/val", math.exp(losses["val"]), self.run.global_step
+        )
+        writer.add_scalar(
+            "lr", self.run.optimizer.param_groups[0]["lr"], self.run.global_step
+        )
+        writer.flush()
 
 
 if __name__ == "__main__":
@@ -299,9 +285,9 @@ if __name__ == "__main__":
         description="Train a Transformer model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python -m src.train -c config.json
-  python -m src.train -c config.json --set learning_rate=1e-4 --set max_steps=10000
-  python -m src.train -c config.json -d runs/my_experiment
+  python src/train.py -c config/large.json
+  python src/train.py -c config/large.json --set learning_rate=1e-4 --set max_steps=10000
+  python src/train.py -c config/large.json -d runs/my_experiment
 """,
     )
     parser.add_argument(
@@ -322,7 +308,7 @@ if __name__ == "__main__":
         "-d",
         "--run-dir",
         default=None,
-        help="override the run directory (default: {runs_dir}/{run_name})",
+        help="override the run directory (default: runs/{run_name})",
         metavar="PATH",
     )
     parser.add_argument(
@@ -336,6 +322,11 @@ if __name__ == "__main__":
         action="store_true",
         help="validate config, load model and data, print summary, then exit",
     )
+    parser.add_argument(
+        "--no-warmup",
+        action="store_true",
+        help="skip the warmup evaluation before the training",
+    )
     # TODO Resume from checkpoint
     args = parser.parse_args()
 
@@ -347,13 +338,13 @@ if __name__ == "__main__":
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     run = Run(config)
-
-    if not args.dry_run:
-        run_dir = args.run_dir or os.path.join(run.config.runs_dir, run.name)
-        os.makedirs(run_dir, exist_ok=True)
+    run_dir = args.run_dir
 
     handlers = [log.StreamHandler()]
     if not args.dry_run:
+        if run_dir is None:
+            run_dir = os.path.join("runs", run.name)
+        os.makedirs(run_dir, exist_ok=True)
         handlers.append(log.FileHandler(os.path.join(run_dir, "train.log")))
 
     log.basicConfig(
@@ -364,14 +355,10 @@ if __name__ == "__main__":
         force=True,
     )
 
-    if args.run_dir:
-        run.config.runs_dir = os.path.dirname(args.run_dir)
-        run.name = os.path.basename(args.run_dir)
-
-    trainer = Trainer(run, device)
+    trainer = Trainer(run, device, run_dir)
 
     if not args.dry_run:
         log.info(f"📁 Run directory: {trainer.run_dir}")
-        trainer.train()
+        trainer.train(no_warmup=args.no_warmup)
     else:
         log.info("✅ Dry run complete. Config is valid and ready to train.")

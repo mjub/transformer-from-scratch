@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 import torch
 
@@ -78,6 +79,13 @@ if __name__ == "__main__":
         choices=["cpu", "cuda"],
     )
     parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="write output to file instead of stdout",
+        metavar="PATH",
+    )
+    parser.add_argument(
         "--set",
         action="append",
         default=[],
@@ -92,15 +100,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    run = train.Run.from_file(args.model, device="cpu")
+    run = train.Run.from_file(args.model)
     try:
         aux.apply_overrides(run.config, **dict(s.split("=", 1) for s in args.set))
     except aux.ConfigError as e:
         parser.error(str(e))
 
     text = " ".join(args.text)
-    print(text, end="", flush=True)
+    output = open(args.output, "w") if args.output else sys.stdout
 
+    output.write(text)
     for token in generate(
         run.model,
         run.tokenizer,
@@ -109,6 +118,10 @@ if __name__ == "__main__":
         temperature=args.temperature,
         device=args.device,
     ):
-        print(token, end="", flush=True)
+        output.write(token)
+        output.flush()
 
-    print()  # newline at end
+    output.write("\n")
+
+    if args.output:
+        output.close()

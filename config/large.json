@@ -30,8 +30,5 @@
     "max_steps": 50000,
 
     "eval_steps": 500,
-    "max_eval_samples": 250,
-
-    "runs_dir": "runs",
-    "checkpoint_steps": 1000
+    "max_eval_samples": 250
 }
