@@ -194,6 +194,8 @@ class Trainer:
                 range(self.run.global_step, self.config.max_steps),
                 desc="Training",
                 unit="steps",
+                initial=self.run.global_step,
+                total=self.config.max_steps,
             )
 
             try:
@@ -295,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c",
         "--config",
-        required=True,
+        default=None,
         help="path to the configuration JSON file",
         metavar="PATH",
     )
@@ -305,6 +307,13 @@ if __name__ == "__main__":
         default=[],
         help="override config values with key=value (can be used multiple times)",
         metavar="KEY=VALUE",
+    )
+    parser.add_argument(
+        "-r",
+        "--resume",
+        default=None,
+        help="path to the checkpoint to resume from",
+        metavar="PATH",
     )
     parser.add_argument(
         "-d",
@@ -329,33 +338,46 @@ if __name__ == "__main__":
         action="store_true",
         help="skip the warmup evaluation before the training",
     )
-    # TODO Resume from checkpoint
     args = parser.parse_args()
-
-    try:
-        config = aux.load_config(args.config)
-        aux.apply_overrides(config, **dict(s.split("=", 1) for s in args.set))
-    except aux.ConfigError as e:
-        parser.error(str(e))
-
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    run = Run(config)
-    run_dir = args.run_dir
-
-    handlers = [log.StreamHandler()]
-    if not args.dry_run:
-        if run_dir is None:
-            run_dir = os.path.join("runs", run.name)
-        os.makedirs(run_dir, exist_ok=True)
-        handlers.append(log.FileHandler(os.path.join(run_dir, "train.log")))
 
     log.basicConfig(
         level=log.INFO,
         format="\033[2m%(asctime)s\033[0m \033[1m\033[36m%(levelname)s\033[0m \033[1m[%(name)s]\033[0m %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=handlers,
+        handlers=[log.StreamHandler()],
         force=True,
     )
+
+    if args.config and args.resume:
+        log.warning(f"⚠️  --resume specified, ignoring --config ({args.config})")
+
+    if not args.config and not args.resume:
+        parser.error("Must specify either --config or --resume")
+
+    if args.resume and args.set:
+        parser.error("Cannot override configuration of a checkpoint")
+
+    try:
+        if args.resume:
+            log.info(f"🔄 Resuming from checkpoint: {args.resume}")
+            run = Run.from_file(args.resume)
+        else:
+            config = aux.load_config(args.config)
+            aux.apply_overrides(config, **dict(s.split("=", 1) for s in args.set))
+            run = Run(config)
+
+    except aux.ConfigError as e:
+        parser.error(str(e))
+
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    run_dir = args.run_dir
+
+    if not args.dry_run:
+        if run_dir is None:
+            run_dir = os.path.join("runs", run.name)
+        os.makedirs(run_dir, exist_ok=True)
+        # Add file handler to the existing logger
+        log.getLogger().addHandler(log.FileHandler(os.path.join(run_dir, "train.log")))
 
     trainer = Trainer(run, device, run_dir)
 
