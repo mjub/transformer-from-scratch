@@ -1,21 +1,20 @@
 import argparse
 
-import tokenizers
 import torch
 
-import train
+from src import aux, train
 
-START_TOKEN = "<|startoftext|>"
-END_TOKEN = "<|endoftext|>"
+START_TOKEN = "< start of text >"
+END_TOKEN = "< end of text >"
 
 
 def generate(
     model,
-    text,
+    tokenizer,
+    text=None,
     tokens=None,
     temperature=0.7,
     device=None,
-    tokenizer="data/tokenizer.json",
 ):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,9 +22,6 @@ def generate(
         device = torch.device(device)
 
     model.to(device)
-
-    if isinstance(tokenizer, str):
-        tokenizer = tokenizers.Tokenizer.from_file(tokenizer)
 
     input_ids = torch.tensor([tokenizer.encode(text or START_TOKEN).ids], device=device)
 
@@ -44,8 +40,13 @@ def generate(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate text using a model created with train.py",
-        epilog=f"If no text is provided, the model will generate a brand new document using {START_TOKEN} by default",
+        description="Generate text from a trained Transformer model",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python infer.py -m checkpoint.pt "A functor is"
+  python infer.py -m checkpoint.pt -n 100 -t 0.8
+  python infer.py -m checkpoint.pt --set max_position_embeddings=512
+""",
     )
     parser.add_argument(
         "-m",
@@ -59,7 +60,7 @@ if __name__ == "__main__":
         "--tokens",
         type=int,
         default=None,
-        help=f"number of tokens to generate (default: until {END_TOKEN} is emitted)",
+        help="number of tokens to generate (default: until end token)",
         metavar="COUNT",
     )
     parser.add_argument(
@@ -67,43 +68,47 @@ if __name__ == "__main__":
         "--temperature",
         type=float,
         default=0.7,
-        help="temperature for the generation",
+        help="sampling temperature (default: 0.7)",
         metavar="TEMP",
     )
     parser.add_argument(
         "--device",
-        type=str,
         default=None,
-        help="set the device on which the model should run (default: the best available)",
+        help="device to run on (default: cuda if available)",
         choices=["cpu", "cuda"],
     )
     parser.add_argument(
-        "--tokenizer",
-        type=str,
-        default=None,
-        help="alternative path to a tokenizer.json file (default: use the path indicated in the model configuration)",
-        metavar="PATH",
+        "--set",
+        action="append",
+        default=[],
+        help="override config values with key=value",
+        metavar="KEY=VALUE",
     )
     parser.add_argument(
         "text",
         nargs="*",
-        help=f"starting text (default: {START_TOKEN})",
+        help="starting text for generation",
         metavar="TEXT",
     )
     args = parser.parse_args()
 
     run = train.Run.from_file(args.model, device="cpu")
-    tokenizer_path = args.tokenizer or run.config.tokenizer
+    try:
+        aux.apply_overrides(run.config, **dict(s.split("=", 1) for s in args.set))
+    except aux.ConfigError as e:
+        parser.error(str(e))
 
     text = " ".join(args.text)
     print(text, end="", flush=True)
 
     for token in generate(
         run.model,
-        text,
+        run.tokenizer,
+        text=text or None,
         tokens=args.tokens,
         temperature=args.temperature,
         device=args.device,
-        tokenizer=tokenizer_path,
     ):
         print(token, end="", flush=True)
+
+    print()  # newline at end

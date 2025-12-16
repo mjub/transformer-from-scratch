@@ -3,7 +3,7 @@
 
     "seed": 1728,
 
-    "tokenizer": "data/tokenizer.json",
+    "tokenizer_path": "data/tokenizer.json",
     "special_tokens": [
         "<|startoftext|>",
         "<|endoftext|>"

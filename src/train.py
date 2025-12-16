@@ -5,10 +5,10 @@ import logging as log
 import math
 import os
 import pprint
-import shutil
 import time
 import types
 
+import tokenizers
 import torch
 import torch.utils.tensorboard
 import torchinfo
@@ -16,12 +16,17 @@ import tqdm
 import tqdm.contrib.logging
 import transformers
 
-import model
+try:
+    from . import aux, model
+except ImportError:
+    import aux
+    import model
 
 
 class Run:
     def __init__(self, config):
         self.config = config
+        self.timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         self.model = model.Transformer(config)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.config.learning_rate
@@ -36,6 +41,8 @@ class Run:
 
         self.best_validation_loss = float("inf")
         self.loss_history = []
+
+        self.tokenizer = tokenizers.Tokenizer.from_file(config.tokenizer_path)
 
         self._info = torchinfo.summary(
             self.model,
@@ -58,13 +65,14 @@ class Run:
         )
 
     @classmethod
-    def from_file(cls, path, device=None):
-        states = torch.load(path, map_location=torch.device(device or "cpu"))
+    def from_file(cls, path, device="cpu"):
+        states = torch.load(path, map_location=torch.device(device))
+        config = aux.config_from_dict(states["config"], validate=False)
 
-        run = cls(types.SimpleNamespace(**states["config"]))
-        # A quick and dirty way to set the attributes
+        run = cls(config)
+        run.tokenizer = tokenizers.Tokenizer.from_str(states["tokenizer"])
         for attr in states:
-            if attr == "config":
+            if attr in ("config", "tokenizer"):
                 continue
             if hasattr(run, attr):
                 if hasattr(getattr(run, attr), "load_state_dict"):
@@ -86,6 +94,7 @@ class Run:
                 "tokens_seen": self.tokens_seen,
                 "best_validation_loss": self.best_validation_loss,
                 "loss_history": self.loss_history,
+                "tokenizer": self.tokenizer.to_str(),
             },
             path,
         )
@@ -119,11 +128,6 @@ class Trainer:
 
         self.run_dir = os.path.join(self.config.runs_dir, self.run.name)
         os.makedirs(self.run_dir, exist_ok=True)
-        # Save the current config within the run directory
-        with open(os.path.join(self.run_dir, "config.json"), "w") as fd:
-            json.dump(vars(self.config), fd)
-        # Also copy the tokenizer
-        shutil.copy(self.config.tokenizer, os.path.join(self.run_dir, "tokenizer.json"))
 
         self.writer = torch.utils.tensorboard.SummaryWriter(log_dir=self.run_dir)
         self.writer_closed = False
@@ -293,33 +297,70 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    # TODO Use argparse
-    # TODO Override config from command line
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Train a Transformer model",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python -m src.train -c config.json
+  python -m src.train -c config.json --set learning_rate=1e-4 --set max_steps=10000
+  python -m src.train -c config.json -d runs/my_experiment
+""",
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        required=True,
+        help="path to the configuration JSON file",
+        metavar="PATH",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="override config values with key=value (can be used multiple times)",
+        metavar="KEY=VALUE",
+    )
+    parser.add_argument(
+        "-d",
+        "--run-dir",
+        default=None,
+        help="override the run directory (default: {runs_dir}/{run_name})",
+        metavar="PATH",
+    )
     # TODO Resume from checkpoint
-    # TODO Check config logic
-    with open("config.json") as fd:
-        config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
+    args = parser.parse_args()
+
+    try:
+        config = aux.load_config(args.config)
+        aux.apply_overrides(config, **dict(s.split("=", 1) for s in args.set))
+    except aux.ConfigError as e:
+        parser.error(str(e))
 
     run = Run(config)
 
-    run_dir = os.path.join(run.config.runs_dir, run.name)
+    # Use custom run_dir if provided, otherwise use default
+    run_dir = args.run_dir or os.path.join(run.config.runs_dir, run.name)
     os.makedirs(run_dir, exist_ok=True)
+
     log.basicConfig(
         level=log.INFO,
         format="\033[2m%(asctime)s\033[0m \033[1m\033[36m%(levelname)s\033[0m \033[1m[%(name)s]\033[0m %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            # Write logs into the run directory as well
             log.FileHandler(os.path.join(run_dir, "train.log")),
             log.StreamHandler(),
         ],
         force=True,
     )
 
-    trainer = Trainer(run)
-    assert run_dir == trainer.run_dir
+    # Inject custom run_dir into trainer if provided
+    if args.run_dir:
+        run.config.runs_dir = os.path.dirname(args.run_dir)
+        run.name = os.path.basename(args.run_dir)
 
+    trainer = Trainer(run)
     log.info(f"📁 Run directory: {trainer.run_dir}")
 
-    # Run a brand-new training round
     trainer.train()
