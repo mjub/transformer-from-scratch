@@ -37,7 +37,6 @@ class Run:
         self.best_validation_loss = float("inf")
         self.loss_history = []
 
-        self.model.eval()
         self._info = torchinfo.summary(
             self.model,
             input_size=(
@@ -45,8 +44,9 @@ class Run:
                 self.config.max_position_embeddings,
             ),
             dtypes=[torch.long],
+            mode="eval",
+            verbose=0,
         )
-        self.model.train()
 
         # We use the first 8 characters of the hash of the configuration to give
         # a somewhat unique name to this run
@@ -58,8 +58,8 @@ class Run:
         )
 
     @classmethod
-    def from_file(cls, path):
-        states = torch.load(path)
+    def from_file(cls, path, device=None):
+        states = torch.load(path, map_location=torch.device(device or "cpu"))
 
         run = cls(types.SimpleNamespace(**states["config"]))
         # A quick and dirty way to set the attributes

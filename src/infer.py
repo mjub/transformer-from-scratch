@@ -92,7 +92,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    run = train.Run.from_file(args.model)
+    run = train.Run.from_file(args.model, device="cpu")
     tokenizer_path = args.tokenizer or run.config.tokenizer
 
     text = " ".join(args.text)
