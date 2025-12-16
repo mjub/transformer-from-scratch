@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import hashlib
 import json
@@ -101,11 +102,8 @@ class Run:
 
 
 class Trainer:
-    def __init__(self, run, device=None):
-        if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
+    def __init__(self, run, device):
+        self.device = torch.device(device)
 
         self.run = run
         self.config = self.run.config
@@ -297,8 +295,6 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Train a Transformer model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -329,6 +325,17 @@ if __name__ == "__main__":
         help="override the run directory (default: {runs_dir}/{run_name})",
         metavar="PATH",
     )
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="device to run on (default: cuda if available)",
+        choices=["cpu", "cuda"],
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate config, load model and data, print summary, then exit",
+    )
     # TODO Resume from checkpoint
     args = parser.parse_args()
 
@@ -338,29 +345,33 @@ if __name__ == "__main__":
     except aux.ConfigError as e:
         parser.error(str(e))
 
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     run = Run(config)
 
-    # Use custom run_dir if provided, otherwise use default
-    run_dir = args.run_dir or os.path.join(run.config.runs_dir, run.name)
-    os.makedirs(run_dir, exist_ok=True)
+    if not args.dry_run:
+        run_dir = args.run_dir or os.path.join(run.config.runs_dir, run.name)
+        os.makedirs(run_dir, exist_ok=True)
+
+    handlers = [log.StreamHandler()]
+    if not args.dry_run:
+        handlers.append(log.FileHandler(os.path.join(run_dir, "train.log")))
 
     log.basicConfig(
         level=log.INFO,
         format="\033[2m%(asctime)s\033[0m \033[1m\033[36m%(levelname)s\033[0m \033[1m[%(name)s]\033[0m %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            log.FileHandler(os.path.join(run_dir, "train.log")),
-            log.StreamHandler(),
-        ],
+        handlers=handlers,
         force=True,
     )
 
-    # Inject custom run_dir into trainer if provided
     if args.run_dir:
         run.config.runs_dir = os.path.dirname(args.run_dir)
         run.name = os.path.basename(args.run_dir)
 
-    trainer = Trainer(run)
-    log.info(f"📁 Run directory: {trainer.run_dir}")
+    trainer = Trainer(run, device)
 
-    trainer.train()
+    if not args.dry_run:
+        log.info(f"📁 Run directory: {trainer.run_dir}")
+        trainer.train()
+    else:
+        log.info("✅ Dry run complete. Config is valid and ready to train.")

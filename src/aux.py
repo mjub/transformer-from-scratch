@@ -51,13 +51,29 @@ def validate_config(config):
             f"divisible by num_key_value_heads ({config.num_key_value_heads})"
         )
 
+    if config.hidden_size % config.num_attention_heads != 0:
+        raise ConfigError(
+            f"hidden_size ({config.hidden_size}) must be divisible by "
+            f"num_attention_heads ({config.num_attention_heads})"
+        )
+
     head_dim = config.hidden_size // config.num_attention_heads
     if head_dim != 64:
-        warnings.warn(f"head_dim = {head_dim} (typically 64)")
+        suggested_heads = config.hidden_size // 64
+        suggested_hidden = config.num_attention_heads * 64
+        warnings.warn(
+            f"head_dim = {head_dim} (typically 64). "
+            f"Consider num_attention_heads={suggested_heads} or hidden_size={suggested_hidden}"
+        )
 
     ratio = config.intermediate_size / config.hidden_size
     if ratio != 4.0:
-        warnings.warn(f"intermediate_size / hidden_size = {ratio:.1f} (typically 4)")
+        suggested_intermediate = config.hidden_size * 4
+        suggested_hidden = config.intermediate_size // 4
+        warnings.warn(
+            f"intermediate_size / hidden_size = {ratio:.1f} (typically 4). "
+            f"Consider intermediate_size={suggested_intermediate} or hidden_size={suggested_hidden}"
+        )
 
     for attr in ["tokenizer_path", "train_data", "val_data"]:
         path = getattr(config, attr)
