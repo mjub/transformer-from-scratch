@@ -5,38 +5,37 @@ import torch
 
 from src import aux, train
 
-START_TOKEN = "< start of text >"
-END_TOKEN = "< end of text >"
 
+class GenerativeRun(train.Run):
 
-def generate(
-    model,
-    tokenizer,
-    text=None,
-    tokens=None,
-    temperature=0.7,
-    device=None,
-):
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(device)
+    START_TOKEN = "<|startoftext|>"
+    END_TOKEN = "<|endoftext|>"
 
-    model.to(device)
+    @torch.no_grad()
+    def generate(self, text, temperature=0.8, top_k=50, device="cpu"):
+        self.model.to(device)
+        self.model.eval()
 
-    input_ids = torch.tensor([tokenizer.encode(text or START_TOKEN).ids], device=device)
+        input_ids = torch.tensor(
+            [self.tokenizer.encode(text or GenerativeRun.START_TOKEN).ids],
+            device=device,
+        )
 
-    count = 0
-    for token_ids in model.generate(input_ids, temperature=temperature, top_k=50):
-        decoded = tokenizer.decode(token_ids[0].tolist())
-        count += 1
+        while True:
+            # Keep no more than max_position_embeddings tokens
+            if input_ids.size(1) > self.config.max_position_embeddings:
+                input_ids = input_ids[:, -self.config.max_position_embeddings :]
 
-        if decoded == END_TOKEN:
-            return
-        if tokens is not None and count > tokens:
-            return
+            next_token = self.model.next_token(
+                input_ids, temperature=temperature, top_k=top_k
+            )
 
-        yield decoded
+            decoded = self.tokenizer.decode(next_token[0].tolist())
+            if decoded == GenerativeRun.END_TOKEN:
+                return
+            yield decoded
+
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
 
 if __name__ == "__main__":
@@ -44,16 +43,16 @@ if __name__ == "__main__":
         description="Generate text from a trained Transformer model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python infer.py -m checkpoint.pt "A functor is"
-  python infer.py -m checkpoint.pt -n 100 -t 0.8
-  python infer.py -m checkpoint.pt --set max_position_embeddings=512
+  python infer.py -r runs/nlab-gpt-large.pt "A functor is"
+  python infer.py -r runs/nlab-gpt-large.pt -n 100 -t 0.8
+  python infer.py -r runs/nlab-gpt-large.pt --set max_position_embeddings=512
 """,
     )
     parser.add_argument(
-        "-m",
-        "--model",
+        "-r",
+        "--run",
         required=True,
-        help="path to the model checkpoint",
+        help="path to a run checkpoint",
         metavar="PATH",
     )
     parser.add_argument(
@@ -68,9 +67,17 @@ if __name__ == "__main__":
         "-t",
         "--temperature",
         type=float,
-        default=0.7,
-        help="sampling temperature (default: 0.7)",
+        default=0.8,
+        help="sampling temperature (default: 0.8)",
         metavar="TEMP",
+    )
+    parser.add_argument(
+        "-k",
+        "--top_k",
+        type=int,
+        default=50,
+        help="top_k value (default: 50)",
+        metavar="K",
     )
     parser.add_argument(
         "--device",
@@ -86,13 +93,6 @@ if __name__ == "__main__":
         metavar="PATH",
     )
     parser.add_argument(
-        "--set",
-        action="append",
-        default=[],
-        help="override config values with key=value",
-        metavar="KEY=VALUE",
-    )
-    parser.add_argument(
         "text",
         nargs="*",
         help="starting text for generation",
@@ -100,26 +100,27 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    run = train.Run.from_file(args.model)
-    try:
-        aux.apply_overrides(run.config, **dict(s.split("=", 1) for s in args.set))
-    except aux.ConfigError as e:
-        parser.error(str(e))
+    run = GenerativeRun.from_file(args.run)
+
+    device = args.device
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     text = " ".join(args.text)
     output = open(args.output, "w") if args.output else sys.stdout
 
-    output.write(text)
-    for token in generate(
-        run.model,
-        run.tokenizer,
-        text=text or None,
-        tokens=args.tokens,
-        temperature=args.temperature,
-        device=args.device,
-    ):
-        output.write(token)
-        output.flush()
+    try:
+        for n, token in enumerate(
+            run.generate(
+                text, temperature=args.temperature, top_k=args.top_k, device=device
+            )
+        ):
+            if args.tokens and n >= args.tokens:
+                break
+            output.write(token)
+            output.flush()
+    except KeyboardInterrupt:
+        pass
 
     output.write("\n")
 

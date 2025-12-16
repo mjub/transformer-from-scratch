@@ -22,7 +22,7 @@ except ImportError:
 
 
 class Run:
-    def __init__(self, config):
+    def __init__(self, config, tokenizer=None):
         self.config = config
         self.timestamp = datetime.datetime.now(datetime.UTC).isoformat()
         self.model = model.Transformer(config)
@@ -40,7 +40,10 @@ class Run:
         self.best_validation_loss = float("inf")
         self.loss_history = []
 
-        self.tokenizer = tokenizers.Tokenizer.from_file(config.tokenizer_path)
+        if tokenizer is None:
+            self.tokenizer = tokenizers.Tokenizer.from_file(config.tokenizer_path)
+        else:
+            self.tokenizer = tokenizer
 
         self._info = torchinfo.summary(
             self.model,
@@ -67,8 +70,7 @@ class Run:
         states = torch.load(path, map_location="cpu")
         config = aux.config_from_dict(states["config"], validate=False)
 
-        run = cls(config)
-        run.tokenizer = tokenizers.Tokenizer.from_str(states["tokenizer"])
+        run = cls(config, tokenizer=tokenizers.Tokenizer.from_str(states["tokenizer"]))
         for attr in states:
             if attr in ("config", "tokenizer"):
                 continue

@@ -192,25 +192,23 @@ class Transformer(nn.Module):
         else:
             return logits
 
-    # TODO Refactor
     @torch.no_grad()
-    def generate(self, input_ids, temperature=1.0, top_k=None):
-        # We keep no more than max_position_embeddings tokens
-        input_ids = input_ids[:, -self.config.max_position_embeddings :]
-        while True:
-            # (B, T) -> (B, T, V)
-            logits = self(input_ids[:, -self.config.max_position_embeddings :])
-            # (B, T, V) -> (B, V)
-            logits = logits[:, -1, :] / temperature
+    def next_token(self, x, temperature=0.8, top_k=50):
+        # (B, T) -> (B, T, V)
+        logits = self(x)
+        # (B, T, V) -> (B, V)
+        logits = logits[:, -1, :]
 
-            if top_k is not None:
-                v, _ = torch.topk(logits, top_k)
-                logits = logits.masked_fill(logits < v[:, [-1]], -torch.inf)
+        if temperature == 0.0:
+            # Greedy decoding
+            return torch.argmax(logits, dim=-1, keepdim=True)
 
-            probs = F.softmax(logits, dim=-1)
+        logits = logits / temperature
 
-            next_token = torch.multinomial(probs, num_samples=1)
-            yield next_token
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits = logits.masked_fill(logits < v[:, [-1]], -torch.inf)
 
-            input_ids = torch.cat([input_ids, next_token], dim=1)
-            input_ids = input_ids[:, -self.config.max_position_embeddings :]
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        return next_token
