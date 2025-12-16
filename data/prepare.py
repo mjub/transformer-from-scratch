@@ -1,20 +1,21 @@
+import argparse
 import html
 import itertools
-import json
 import logging as log
 import os
 import pathlib
 import random
 import re
-import types
+import sys
 
 import torch
 import tqdm
 
+sys.path.append("src")
+import aux
+
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 import tokenizers
-
-SOURCE_DIR = "nlab-content"
 
 NORMALIZE_PATTERNS = list(
     map(
@@ -68,8 +69,8 @@ def normalize(document):
     return document
 
 
-def prepare_data(config):
-    pages = list(pathlib.Path(SOURCE_DIR).rglob("*.md"))
+def prepare_data(config, source_dir):
+    pages = list(pathlib.Path(source_dir).rglob("*.md"))
 
     random.seed(config.seed)
     random.shuffle(pages)
@@ -101,8 +102,8 @@ def prepare_data(config):
         vocab_size=config.vocab_size, special_tokens=config.special_tokens
     )
     tokenizer.train_from_iterator(documents, trainer=trainer, length=len(documents))
-    tokenizer.save(config.tokenizer)
-    log.info(f"✅ Tokenizer trained and saved to {config.tokenizer}")
+    tokenizer.save(config.tokenizer_path)
+    log.info(f"✅ Tokenizer trained and saved to {config.tokenizer_path}")
     log.info(f"    → Vocab size: {tokenizer.get_vocab_size():,}")
 
     log.info("⚙️  Encoding the data now...")
@@ -128,9 +129,31 @@ def prepare_data(config):
     torch.save(data[n:].clone(), config.val_data)
 
     log.info(f"✅ Done! Train: {n:,} tokens | Val: {len(data) - n:,} tokens")
+    log.info(f"    → Training data saved at: {config.train_data}")
+    log.info(f"    → Validation data saved at: {config.val_data}")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Prepare data for training",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        required=True,
+        help="path to the configuration JSON file",
+        metavar="PATH",
+    )
+    parser.add_argument(
+        "-s",
+        "--source-dir",
+        default="nlab-content",
+        help="path to the source directory (default: nlab-content)",
+        metavar="PATH",
+    )
+    args = parser.parse_args()
+
     log.basicConfig(
         level=log.INFO,
         format="\033[2m%(asctime)s\033[0m \033[1m\033[36m%(levelname)s\033[0m \033[1m[%(name)s]\033[0m %(message)s",
@@ -142,9 +165,10 @@ if __name__ == "__main__":
         force=True,
     )
 
-    # TODO Use argparse
-    with open("config.json") as fd:
-        config = json.load(fd, object_hook=lambda d: types.SimpleNamespace(**d))
+    try:
+        config = aux.load_config(args.config)
+    except aux.ConfigError as e:
+        parser.error(str(e))
 
-    log.info("🚀 Starting data preparation...")
-    prepare_data(config)
+    log.info(f"🚀 Starting data preparation with config: {args.config}")
+    prepare_data(config, args.source_dir)
