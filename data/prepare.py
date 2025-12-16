@@ -165,10 +165,5 @@ if __name__ == "__main__":
         force=True,
     )
 
-    try:
-        config = aux.load_config(args.config)
-    except aux.ConfigError as e:
-        parser.error(str(e))
-
     log.info(f"🚀 Starting data preparation with config: {args.config}")
-    prepare_data(config, args.source_dir)
+    prepare_data(aux.load_config(args.config, validate=False), args.source_dir)
