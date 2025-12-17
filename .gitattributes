@@ -1,0 +1,13 @@
+# Ignore non-Python files
+LICENSE linguist-vendored
+README.md linguist-vendored
+requirements.txt linguist-vendored
+SCALING.md linguist-vendored
+
+# Directories
+.devcontainer/** linguist-vendored
+.github/** linguist-vendored
+.vscode/** linguist-vendored
+assets/** linguist-vendored
+config/** linguist-vendored
+notebooks/** linguist-vendored
