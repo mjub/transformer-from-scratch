@@ -109,6 +109,10 @@ if __name__ == "__main__":
     text = " ".join(args.text)
     output = open(args.output, "w") if args.output else sys.stdout
 
+    # We write the text given as input
+    output.write(text)
+    output.flush()
+
     try:
         for n, token in enumerate(
             run.generate(
