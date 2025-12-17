@@ -93,7 +93,7 @@ class GroupedQueryAttention(nn.Module):
         if layer is not None and attention_callback:
             detached = attn_weights.detach().cpu().numpy()
             for head in range(self.config.num_attention_heads):
-                attention_callback(layer, head, detached[0, head, :, :])
+                attention_callback(layer, head, detached[:, head, :, :])
         attn_weights = self.attn_dropout(attn_weights)
 
         # (B, H, T, T) @ (B, G * Hk, T, D) -> (B, H, T, D)
