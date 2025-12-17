@@ -1,10 +1,12 @@
 {
     "name": "PyTorch",
-    "image": "ghcr.io/mjub/transformer-from-scratch/devcontainer:latest",
+    "image": "ghcr.io/mjub/nlab-gpt/devcontainer:latest",
     "overrideCommand": true,
     "runArgs": [
         // "--gpus",
-        // "all"
+        // "all",
+        "--network",
+        "host"
     ],
     "workspaceFolder": "/workspace/${localWorkspaceFolderBasename}",
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/${localWorkspaceFolderBasename},type=bind",
