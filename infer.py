@@ -7,17 +7,16 @@ from src import aux, train
 
 
 class GenerativeRun(train.Run):
-
-    START_TOKEN = "<|startoftext|>"
-    END_TOKEN = "<|endoftext|>"
-
     @torch.no_grad()
     def generate(self, text, temperature=0.8, top_k=50, device="cpu"):
         self.model.to(device)
         self.model.eval()
 
+        START_TOKEN = self.tokenizer.encode("<|startoftext|>").ids[0]
+        END_TOKEN = self.tokenizer.encode("<|endoftext|>").ids[0]
+
         input_ids = torch.tensor(
-            [self.tokenizer.encode(text or GenerativeRun.START_TOKEN).ids],
+            [self.tokenizer.encode(text).ids if text else [START_TOKEN]],
             device=device,
         )
 
@@ -29,11 +28,10 @@ class GenerativeRun(train.Run):
             next_token = self.model.next_token(
                 input_ids, temperature=temperature, top_k=top_k
             )
-
-            decoded = self.tokenizer.decode(next_token[0].tolist())
-            if decoded == GenerativeRun.END_TOKEN:
+            if next_token[0] == END_TOKEN:
                 return
-            yield decoded
+
+            yield self.tokenizer.decode(next_token[0].tolist())
 
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
