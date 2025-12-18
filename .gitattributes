@@ -1,13 +1,17 @@
-# Ignore non-Python files
-LICENSE linguist-vendored
-README.md linguist-vendored
-requirements.txt linguist-vendored
-SCALING.md linguist-vendored
+* text=auto eol=lf
 
-# Directories
-.devcontainer/** linguist-vendored
-.github/** linguist-vendored
-.vscode/** linguist-vendored
-assets/** linguist-vendored
-config/** linguist-vendored
-notebooks/** linguist-vendored
+*.py text diff=python
+*.ipynb text linguist-detectable=true
+
+*.ipynb diff=jupyter
+
+*.json text
+*.md text diff=markdown
+
+*.jpg binary
+*.png binary
+
+notebooks/* linguist-generated=false
+assets/* linguist-generated=false
+
+LICENSE text
