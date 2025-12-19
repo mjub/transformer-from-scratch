@@ -57,9 +57,9 @@ I trained three different models with different configurations, all of which can
 
 | Model | Parameters | Validation loss | Configuration file |
 | - | - | - | - |
-| `nlab-gpt-small-4.3M` | 4,295,808 | 2.3053 | [`config/small.json`](https://github.com/mjub/nlab-gpt/blob/main/config/small.json) |
-| `nlab-gpt-medium-8.7M` | 8,654,080 | 2.0324 | [`config/medium.json`](https://github.com/mjub/nlab-gpt/blob/main/config/medium.json) |
-| `nlab-gpt-large-16.4M` | 16,421,760 | 1.7919 | [`config/large.json`](https://github.com/mjub/nlab-gpt/blob/main/config/large.json) |
+| [`nlab-gpt-small-4.3M`](https://github.com/mjub/nlab-gpt/releases/download/v0.1.0/nlab-gpt-small-4.3M.pt) | 4,295,808 | 2.3053 | [`config/small.json`](https://github.com/mjub/nlab-gpt/blob/main/config/small.json) |
+| [`nlab-gpt-medium-8.7M`](https://github.com/mjub/nlab-gpt/releases/download/v0.1.0/nlab-gpt-medium-8.7M.pt) | 8,654,080 | 2.0324 | [`config/medium.json`](https://github.com/mjub/nlab-gpt/blob/main/config/medium.json) |
+| [`nlab-gpt-large-16.4M`](https://github.com/mjub/nlab-gpt/releases/download/v0.1.0/nlab-gpt-large-16.4M.pt) | 16,421,760 | 1.7919 | [`config/large.json`](https://github.com/mjub/nlab-gpt/blob/main/config/large.json) |
 
 The models were trained for 50,000 steps, saving a checkpoint only when the validation loss had strictly decreased after evaluation.
 
