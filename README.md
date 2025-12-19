@@ -21,9 +21,9 @@ I trained a small GPT on nLab text and showed that delimiter-matching behavior r
 
 ## Overview
 
-As a category theorist, I am of course a huge fan of the nLab, which is the _de facto_ Wikipedia for category theory. Its pages are written in a specific markup language, mixed with LaTeX commands and environments.
+I built a Transformer from scratch over the last ten days to understand how it works and fed it the entirety of the nLab (24.2M tokens). As a category theorist, I am of course a huge fan of the nLab, which is the _de facto_ Wikipedia for category theory. Its pages are written in a specific markup language, mixed with LaTeX commands and environments.
 
-I built a Transformer from scratch to understand how it works and chose to feed it the entirety of the nLab (24.2M tokens). While exploring its behavior on this highly structured corpus, I noticed that some attention heads appeared to specialize early in training.
+While exploring the behavior of my model on this highly structured corpus, I noticed that some attention heads appeared to specialize early in training.
 
 Although this project was not initially designed around a specific objective, the experiments below focus on a concrete phenomenon that emerged during exploration: whether delimiter-matching behavior localizes to specific attention heads.
 
@@ -118,9 +118,11 @@ The code underpinning this protocol, as well as all the pretty plots, is availab
 
 I computed the CMS for each layer and head of `nlab-gpt-medium-8.7M` through 55 checkpoints, at different stages of its training. For each checkpoint, I sampled 480 sequences of 512 tokens from the validation dataset, each containing at least two pairs of matching `\begin` and `\end`.
 
-I kept the maximum CMS over all heads for each layer and subtracted the median CMS to estimate how specifically the maximum head is activated in a layer compared to the other heads. The results are plotted below:
+I kept the maximum CMS over all heads for each layer and subtracted the median CMS. This gap measures how much a layer relies on a single specialized head rather than diffuse attention. The results are plotted below:
 
 ![](assets/cms-gap-nlab-gpt-medium-8.7M.png)
+
+_Early spikes likely reflect unstable, transient heuristics that later disappear_
 
 We see that at the beginning of training, Layer 4 briefly spikes before collapsing for good. On the other hand, Layer 3 gradually increases to the point of maintaining a consistently large distance with all the other layers starting from step 15,000.
 
@@ -138,7 +140,9 @@ The "hit rate" is defined as the frequency at which a head consistently places t
 
 ![](assets/cms-nlab-gpt-medium-8.7M.png)
 
-We notice a clear outlier: Head 3 in Layer 3 sharply responds to delimiters, well above all other heads across all layers. Both the CMS and hit rate are peaky, firmly establishing that this is not just a diffuse layer-level effect, but the emergence of a dedicated delimiter-matching head with an interpretable mechanism, rather than incidental correlation or noise.
+_Layer 3, Head 3 dominates both metrics_
+
+We notice a clear outlier: Head 3 in Layer 3 sharply responds to delimiters, well above all other heads across all layers. Both the CMS and hit rate are peaky, firmly establishing that this is not just a diffuse layer-level effect, but the emergence of a dedicated delimiter-matching head with an interpretable mechanism.
 
 > **Remark:** The CMS and hit rate measure the attention score of a closing delimiter with its opening delimiter from different perspectives. It should therefore come as no surprise on the heatmap that the two are correlated.
 >
@@ -153,6 +157,8 @@ Each row corresponds to the normalized attention score of a token over all its p
 
 ![](assets/attention-layer-3-head-3-nlab-gpt-medium-8.7M.png)
 
+_Brighter values indicate higher normalized attention to earlier tokens_
+
 We observe a clear diagonal between matching delimiters. In the first example, the sequence `end`, `{`, `proof` attends to the sequence `{`, `proof`, `}` following the matching `begin`! In other words, the head does not directly attend to the `\begin` token itself, but to the tokens that followed it, effectively retrieving the local continuation of the previous occurrence.
 
 One hypothesis is that the head _copies the past_: when it sees `end`, then the next token is most likely the same as the one following the previous `begin`. This is further confirmed by the other examples: we see a bright diagonal shifted by one when a sequence of tokens repeats.
@@ -163,8 +169,8 @@ This behavior is consistent with what is commonly referred to as an _induction-l
 
 Even at small scale, "structure" does not stay diffuse: it collapses into a tiny, inspectable circuit, one head that reliably carries delimiter-matching behavior. That does not imply full syntactic parsing, but it does give a concrete, testable mechanism for how structured text can shape model internals.
 
-Here are a couple of things and questions I want to try next:
+Here are a couple of things and questions I want to explore next:
 
  - The masked self-attention mechanism is unidirectional (triangular matrix). Tokens are processed and generated from left to right. Can I hack the attention mask to enable nonlinear, e.g. tree-like generation?
- - Can we stitch together several, complementary input sources into a single output with the cross-attention mechanism?
+ - Can we stitch together several complementary input sources into a single output with the cross-attention mechanism?
  - Finally, training a small model on a small dataset demonstrated that Transformers are not magic wands or perfect _compressors_. I want to investigate how this connects to algorithmic information theory.
