@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11.1-blue?logo=python)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.8.0-red?logo=pytorch)
 
-I trained a small GPT on nLab text and showed that delimiter-matching behavior rapidly localizes to a specific attention head.
+I trained a small GPT on nLab text and observed that a specific attention head consistently learned to match opening and closing delimiters.
 
 > This repository is not affiliated with the [nLab](https://ncatlab.org/nlab/show/HomePage) and its authors.
 
@@ -23,11 +23,11 @@ I trained a small GPT on nLab text and showed that delimiter-matching behavior r
 
 I built a Transformer from scratch over the last ten days to understand how it works and fed it the entirety of the nLab (24.2M tokens). As a category theorist, I am of course a huge fan of the nLab, which is the _de facto_ Wikipedia for category theory. Its pages are written in a specific markup language, mixed with LaTeX commands and environments.
 
-While exploring the behavior of my model on this highly structured corpus, I noticed that some attention heads appeared to specialize early in training.
+While analyzing the model's behavior, I noticed that specific attention heads began to specialize early in the training process.
 
-Although this project was not initially designed around a specific objective, the experiments below focus on a concrete phenomenon that emerged during exploration: whether delimiter-matching behavior localizes to specific attention heads.
+Although this project was not initially designed around a specific objective, I decided to focus on a clear pattern that emerged: the model's ability to match delimiters.
 
-For a fixed model, I measured the propensity of each head to properly match an `\end` token to its corresponding `\begin` using a _Contrastive Matching Score_. Tracking this score across training checkpoints, layers, and heads reveals that one layer, and in particular a single head, quickly stands out. A closer inspection of its attention patterns shows a clear recency-based retrieval behavior that is consistent with what is often described as an "induction-like" mechanism.
+For a fixed model, I measured the propensity of each head to properly match an `\end` token to its corresponding `\begin` using a _Contrastive Matching Score_. Tracking this score across training checkpoints, layers, and heads reveals that one layer, and in particular a single head, quickly stands out. Visualizing the attention patterns reveals that this head looks back at recent history to find the matching token, which is what is often described as an "induction-like" mechanism.
 
 This suggests that even in a small model trained on a relatively modest amount of data (with a low _Chinchilla ratio_ of ≈2.8 tokens per parameter), structured training data can give rise to localized and interpretable attention behaviors early in training.
 
@@ -36,7 +36,7 @@ This suggests that even in a small model trained on a relatively modest amount o
 
 ### Data
 
-The nLab hosts 20,361 pages as of December 2025 (commit [`aa13ac3`](https://github.com/ncatlab/nlab-content/tree/aa13ac3a39e2e501a1444a52396e16fb329ad39c)). Pages were processed with [`data/prepare.py`](https://github.com/mjub/nlab-gpt/blob/main/data/prepare.py) to remove low-signal markup such as typographic and template engine instructions (e.g. `**bold**` or `[[!include]]`) as well as internal references. All pages were then randomly concatenated and tokenized, with a vocabulary size of 8,192 tokens.
+The nLab hosts 20,361 pages as of December 2025 (commit [`aa13ac3`](https://github.com/ncatlab/nlab-content/tree/aa13ac3a39e2e501a1444a52396e16fb329ad39c)). Pages were processed with [`data/prepare.py`](https://github.com/mjub/nlab-gpt/blob/main/data/prepare.py) to remove low-signal markup such as typographic and template engine instructions (e.g., `**bold**` or `[[!include]]`) as well as internal references. All pages were then randomly concatenated and tokenized, with a vocabulary size of 8,192 tokens.
 
 The data were split into two sets, as follows:
 
@@ -84,7 +84,7 @@ Sequences were randomly sampled from the validation dataset, with the requiremen
 
 This criterion is necessary to compute the Contrastive Matching Score (CMS), which measures how selectively a head matches an `\end` token to its corresponding `\begin` compared to other preceding openings.
 
-The goal of CMS is not to define a canonical metric, but to provide a simple contrastive signal that highlights delimiter-specific specialization.
+This score is not meant to be a rigorous metric, but rather a simple signal to highlight when a head specializes in delimiters.
 
 <details>
 <summary>Click here for more details about CMS</summary>
@@ -112,7 +112,7 @@ The final CMS for each layer and head is computed as the average over several se
 
 ---
 
-The code underpinning this protocol, as well as all the pretty plots, is available in [`notebooks/delimiter-analysis.ipynb`](https://github.com/mjub/nlab-gpt/blob/main/notebooks/delimiter-analysis.ipynb)
+The code underpinning this protocol, as well as all the pretty plots, is available in [`notebooks/delimiter-analysis.ipynb`](https://github.com/mjub/nlab-gpt/blob/main/notebooks/delimiter-analysis.ipynb).
 
 ## Contrastive gap across layers
 
@@ -126,7 +126,7 @@ _Early spikes likely reflect unstable, transient heuristics that later disappear
 
 We see that at the beginning of training, Layer 4 briefly spikes before collapsing for good. On the other hand, Layer 3 gradually increases to the point of maintaining a consistently large distance with all the other layers starting from step 15,000.
 
-This illustrates that specialization is not monotonic across depth: while some layers exhibit transient, unstable specialization early in training (Layer 4), others (Layer 3) progressively develop and retain a structurally meaningful contrastive head, suggesting a sustained functional role rather than a training artifact.
+This shows that specialization does not happen uniformly. While Layer 4 shows some transient activity, Layer 3 steadily develops and maintains a specialized role.
 
 > **Remark:** Given the small size of the validation dataset (2.7M tokens), the probability of sampling overlapping or identical sequences (i.e. a _collision_) is extremely high. Additionally, the restriction of containing at least two pairs of matching `\begin` and `\end` reduces the number of valid sequences from the validation dataset, which further increases the probability of a collision.
 >
@@ -142,7 +142,7 @@ The "hit rate" is defined as the frequency at which a head consistently places t
 
 _Layer 3, Head 3 dominates both metrics_
 
-We notice a clear outlier: Head 3 in Layer 3 sharply responds to delimiters, well above all other heads across all layers. Both the CMS and hit rate are peaky, firmly establishing that this is not just a diffuse layer-level effect, but the emergence of a dedicated delimiter-matching head with an interpretable mechanism.
+We notice a clear outlier: Head 3 in Layer 3 sharply responds to delimiters, well above all other heads across all layers. Both the CMS and hit rate are peaky. The sharp peak confirms this is not a general layer-wide trend, but the result of a single head dedicated to matching delimiters.
 
 > **Remark:** The CMS and hit rate measure the attention score of a closing delimiter with its opening delimiter from different perspectives. It should therefore come as no surprise on the heatmap that the two are correlated.
 >
